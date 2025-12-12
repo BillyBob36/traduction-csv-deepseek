@@ -104,7 +104,9 @@ router.post('/', upload.array('files'), async (req, res) => {
 
   try {
     const results = [];
-    const parallelController = new ParallelController(30); // 30 requêtes max simultanées
+    // DeepSeek n'a PAS de rate limit - on peut paralléliser massivement
+    // Limité à 100 pour éviter de surcharger la RAM (512MB sur Render Starter)
+    const parallelController = new ParallelController(100);
     
     let globalTotalLines = 0;
     let globalProcessedLines = 0;
@@ -150,8 +152,8 @@ router.post('/', upload.array('files'), async (req, res) => {
         linesToTranslate: sourceTexts.length
       });
 
-      // Créer les batches de 50 lignes
-      const batches = createBatches(sourceTexts, 50);
+      // Créer les batches de 25 lignes (plus petits = meilleure parallélisation)
+      const batches = createBatches(sourceTexts, 25);
       const translationsMap = new Map();
       let fileProcessedBatches = 0;
 
