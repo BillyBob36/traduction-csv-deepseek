@@ -73,6 +73,10 @@ router.post('/', upload.array('files'), async (req, res) => {
   const sessionId = req.body.sessionId || `session_${Date.now()}`;
   const targetLanguage = req.body.targetLanguage;
   const files = req.files;
+  
+  // Mode test : limiter le nombre de lignes
+  const testMode = req.body.testMode === 'true';
+  const testLines = parseInt(req.body.testLines) || 10;
 
   // Validation
   if (!files || files.length === 0) {
@@ -91,7 +95,7 @@ router.post('/', upload.array('files'), async (req, res) => {
     return res.status(500).json({ error: 'Clé API DeepSeek non configurée' });
   }
 
-  console.log(`[Traduction] Début - ${files.length} fichier(s), langue: ${targetLanguage}`);
+  console.log(`[Traduction] Début - ${files.length} fichier(s), langue: ${targetLanguage}${testMode ? ` (TEST: ${testLines} lignes)` : ''}`);
 
   // Réinitialiser les stats de cache
   resetCacheStats();
@@ -107,8 +111,15 @@ router.post('/', upload.array('files'), async (req, res) => {
     const filesData = [];
     for (const file of files) {
       const { rows, sourceTexts } = await parseCSV(file.buffer);
-      filesData.push({ file, rows, sourceTexts });
-      globalTotalLines += sourceTexts.length;
+      
+      // Mode test : limiter les lignes à traduire
+      let textsToTranslate = sourceTexts;
+      if (testMode) {
+        textsToTranslate = sourceTexts.slice(0, testLines);
+      }
+      
+      filesData.push({ file, rows, sourceTexts: textsToTranslate, allSourceTexts: sourceTexts });
+      globalTotalLines += textsToTranslate.length;
     }
 
     sendSSE(sessionId, {
@@ -185,9 +196,12 @@ router.post('/', upload.array('files'), async (req, res) => {
       // Générer le CSV traduit
       const translatedCSV = await generateCSV(rows);
 
+      // Nom du fichier avec suffixe test si applicable
+      const suffix = testMode ? `_TEST_${targetLanguage}` : `_${targetLanguage}`;
+      
       results.push({
         originalName: fileName,
-        translatedName: fileName.replace('.csv', `_${targetLanguage}.csv`),
+        translatedName: fileName.replace('.csv', `${suffix}.csv`),
         content: translatedCSV,
         linesTranslated: sourceTexts.length
       });

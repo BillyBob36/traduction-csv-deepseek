@@ -10,7 +10,9 @@ const state = {
   sessionId: null,
   eventSource: null,
   translatedFiles: [],
-  isTranslating: false
+  isTranslating: false,
+  testMode: false,
+  testLines: 10
 };
 
 // Éléments DOM
@@ -48,7 +50,13 @@ const elements = {
   estFiles: document.getElementById('estFiles'),
   estLines: document.getElementById('estLines'),
   estCost: document.getElementById('estCost'),
-  estTime: document.getElementById('estTime')
+  estTime: document.getElementById('estTime'),
+  // Test mode
+  testSection: document.getElementById('testSection'),
+  testModeCheckbox: document.getElementById('testModeCheckbox'),
+  testLinesInput: document.getElementById('testLinesInput'),
+  testLinesCount: document.getElementById('testLinesCount'),
+  testBtn: document.getElementById('testBtn')
 };
 
 /**
@@ -130,12 +138,28 @@ function setupEventListeners() {
   });
 
   // Translate button
-  elements.translateBtn.addEventListener('click', startTranslation);
+  elements.translateBtn.addEventListener('click', () => startTranslation(false));
+
+  // Test mode checkbox
+  elements.testModeCheckbox.addEventListener('change', (e) => {
+    state.testMode = e.target.checked;
+    elements.testLinesInput.hidden = !state.testMode;
+    elements.testBtn.hidden = !state.testMode;
+    elements.translateBtn.hidden = state.testMode;
+  });
+
+  // Test lines count
+  elements.testLinesCount.addEventListener('change', (e) => {
+    state.testLines = parseInt(e.target.value) || 10;
+  });
+
+  // Test button
+  elements.testBtn.addEventListener('click', () => startTranslation(true));
 
   // Download buttons
   elements.downloadAllBtn.addEventListener('click', downloadAll);
   elements.newTranslationBtn.addEventListener('click', resetApp);
-  elements.retryBtn.addEventListener('click', startTranslation);
+  elements.retryBtn.addEventListener('click', () => startTranslation(false));
 }
 
 /**
@@ -217,6 +241,7 @@ function updateUI() {
   elements.filesList.hidden = !hasFiles;
   elements.languageSection.hidden = !hasFiles;
   elements.estimateSection.hidden = !(hasFiles && hasLanguage);
+  elements.testSection.hidden = !(hasFiles && hasLanguage);
   elements.actionSection.hidden = !(hasFiles && hasLanguage);
 }
 
@@ -251,8 +276,9 @@ async function getEstimate() {
 
 /**
  * Démarre la traduction
+ * @param {boolean} isTest - Si true, mode test avec nombre limité de lignes
  */
-async function startTranslation() {
+async function startTranslation(isTest = false) {
   if (state.isTranslating) return;
 
   state.isTranslating = true;
@@ -262,6 +288,7 @@ async function startTranslation() {
   // Masquer les autres sections
   elements.actionSection.hidden = true;
   elements.estimateSection.hidden = true;
+  elements.testSection.hidden = true;
   elements.errorSection.hidden = true;
   elements.resultsSection.hidden = true;
   elements.progressSection.hidden = false;
@@ -277,6 +304,12 @@ async function startTranslation() {
   state.files.forEach(file => formData.append('files', file));
   formData.append('targetLanguage', state.selectedLanguage);
   formData.append('sessionId', state.sessionId);
+
+  // Mode test : limiter le nombre de lignes
+  if (isTest) {
+    formData.append('testMode', 'true');
+    formData.append('testLines', state.testLines.toString());
+  }
 
   try {
     const response = await fetch('/api/translate', {
@@ -491,7 +524,15 @@ function resetApp() {
   elements.filesList.hidden = true;
   elements.languageSection.hidden = true;
   elements.estimateSection.hidden = true;
+  elements.testSection.hidden = true;
   elements.actionSection.hidden = true;
+
+  // Reset test mode
+  state.testMode = false;
+  elements.testModeCheckbox.checked = false;
+  elements.testLinesInput.hidden = true;
+  elements.testBtn.hidden = true;
+  elements.translateBtn.hidden = false;
 }
 
 /**
