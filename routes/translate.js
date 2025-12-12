@@ -45,6 +45,27 @@ const sseClients = new Map();
 // Map pour stocker les sessions de traduction en cours (pour téléchargement temp)
 const activeSessions = new Map();
 
+// Throttle pour les updates SSE (évite de surcharger le navigateur)
+const sseThrottles = new Map();
+const SSE_THROTTLE_MS = 100; // Max 10 updates par seconde
+
+function sendSSEThrottled(sessionId, data) {
+  const now = Date.now();
+  const lastSent = sseThrottles.get(sessionId) || 0;
+  
+  // Toujours envoyer les messages importants immédiatement
+  if (data.type !== 'progress') {
+    sendSSE(sessionId, data);
+    return;
+  }
+  
+  // Throttle les messages de progression
+  if (now - lastSent >= SSE_THROTTLE_MS) {
+    sendSSE(sessionId, data);
+    sseThrottles.set(sessionId, now);
+  }
+}
+
 /**
  * Route SSE pour la progression en temps réel
  */
@@ -281,6 +302,7 @@ router.post('/', upload.array('files'), async (req, res) => {
         25
       );
       let fileProcessedBatches = 0;
+      let fileProcessedTexts = 0;
 
       // Traiter les batches en parallèle
       const batchPromises = batches.map((batch, batchIndex) => 
@@ -291,51 +313,67 @@ router.post('/', upload.array('files'), async (req, res) => {
             const { translations } = await translateBatch(texts, targetLanguage, apiKey);
             
             // Sauvegarder chaque traduction dans le fichier temp
-            batch.forEach((item, i) => {
+            for (let i = 0; i < batch.length; i++) {
+              const item = batch[i];
               const translation = translations[i] || '';
-              // Récupérer les indices originaux depuis uniqueTexts
               const originalIndices = uniqueTexts[item.index].indices;
               saveTempTranslation(sessionId, fileIndex, item.text, translation, originalIndices);
-            });
+              
+              // Incrémenter les compteurs
+              fileProcessedTexts++;
+              globalProcessedUnique++;
+              
+              // Calculer les lignes originales correspondantes
+              const linesForThisText = originalIndices.length;
+              
+              // Envoyer update de progression (throttled)
+              sendSSEThrottled(sessionId, {
+                type: 'progress',
+                fileIndex,
+                fileName,
+                fileProcessedTexts,
+                fileTotalTexts: dedup.totalUnique,
+                globalProcessedUnique,
+                globalTotalUnique,
+                globalProcessedLines: Math.round((globalProcessedUnique / globalTotalUnique) * globalTotalOriginal),
+                globalTotalLines: globalTotalOriginal,
+                percentComplete: Math.round((globalProcessedUnique / globalTotalUnique) * 100),
+                cacheStats: getCacheStats()
+              });
+            }
 
             fileProcessedBatches++;
-            globalProcessedUnique += batch.length;
-
-            // Calculer la progression en termes de lignes originales traitées
-            const processedOriginalLines = filesData
-              .slice(0, fileIndex)
-              .reduce((sum, f) => sum + f.dedup.totalOriginal, 0) +
-              Math.round((fileProcessedBatches / batches.length) * dedup.totalOriginal);
-
-            // Envoyer la progression
-            sendSSE(sessionId, {
-              type: 'progress',
-              fileIndex,
-              fileName,
-              fileBatchesProcessed: fileProcessedBatches,
-              fileTotalBatches: batches.length,
-              globalProcessedUnique,
-              globalTotalUnique,
-              globalProcessedLines: processedOriginalLines,
-              globalTotalLines: globalTotalOriginal,
-              percentComplete: Math.round((globalProcessedUnique / globalTotalUnique) * 100),
-              cacheStats: getCacheStats()
-            });
 
           } catch (error) {
             console.error(`[Batch ${batchIndex}] Erreur:`, error.message);
             // En cas d'erreur, sauvegarder avec message d'erreur
-            batch.forEach(item => {
+            for (const item of batch) {
               const originalIndices = uniqueTexts[item.index].indices;
               saveTempTranslation(sessionId, fileIndex, item.text, `[ERREUR: ${error.message}]`, originalIndices);
-            });
-            globalProcessedUnique += batch.length;
+              fileProcessedTexts++;
+              globalProcessedUnique++;
+            }
           }
         })
       );
 
       // Attendre que tous les batches soient traités
       await Promise.all(batchPromises);
+
+      // Forcer une update SSE finale pour ce fichier (pas throttled)
+      sendSSE(sessionId, {
+        type: 'progress',
+        fileIndex,
+        fileName,
+        fileProcessedTexts: dedup.totalUnique,
+        fileTotalTexts: dedup.totalUnique,
+        globalProcessedUnique,
+        globalTotalUnique,
+        globalProcessedLines: Math.round((globalProcessedUnique / globalTotalUnique) * globalTotalOriginal),
+        globalTotalLines: globalTotalOriginal,
+        percentComplete: Math.round((globalProcessedUnique / globalTotalUnique) * 100),
+        cacheStats: getCacheStats()
+      });
 
       // Charger les traductions depuis le fichier temp
       const translationsMap = loadTempTranslations(sessionId, fileIndex);
@@ -380,9 +418,10 @@ router.post('/', upload.array('files'), async (req, res) => {
       }
     });
 
-    // Nettoyer les fichiers temporaires
+    // Nettoyer les fichiers temporaires et le throttle
     cleanupTempFiles(sessionId);
     activeSessions.delete(sessionId);
+    sseThrottles.delete(sessionId);
 
     // Si un seul fichier, retourner directement le CSV
     if (results.length === 1) {
@@ -415,6 +454,7 @@ router.post('/', upload.array('files'), async (req, res) => {
     // Nettoyer en cas d'erreur aussi
     cleanupTempFiles(sessionId);
     activeSessions.delete(sessionId);
+    sseThrottles.delete(sessionId);
 
     res.status(500).json({ error: error.message });
   }
