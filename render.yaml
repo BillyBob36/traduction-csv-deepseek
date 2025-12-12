@@ -4,12 +4,13 @@
 services:
   - type: web
     name: csv-translator-deepseek
-    env: node
-    region: frankfurt # Plus proche de l'Europe
-    plan: starter # $7/mois - 512MB RAM
-    buildCommand: npm install
-    startCommand: npm start
+    runtime: node
+    region: frankfurt
+    plan: starter
+    buildCommand: npm ci --production
+    startCommand: node server.js
     healthCheckPath: /health
+    autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
