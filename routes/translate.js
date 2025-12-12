@@ -78,6 +78,8 @@ router.post('/', upload.array('files'), async (req, res) => {
   const testMode = req.body.testMode === 'true';
   const testLines = parseInt(req.body.testLines) || 10;
 
+  console.log(`[Debug] testMode: ${testMode}, testLines: ${testLines}, body:`, req.body);
+
   // Validation
   if (!files || files.length === 0) {
     return res.status(400).json({ error: 'Aucun fichier uploadé' });
@@ -95,7 +97,7 @@ router.post('/', upload.array('files'), async (req, res) => {
     return res.status(500).json({ error: 'Clé API DeepSeek non configurée' });
   }
 
-  console.log(`[Traduction] Début - ${files.length} fichier(s), langue: ${targetLanguage}${testMode ? ` (TEST: ${testLines} lignes)` : ''}`);
+  console.log(`[Traduction] Début - ${files.length} fichier(s), langue: ${targetLanguage}${testMode ? ` (MODE TEST: ${testLines} lignes max)` : ' (COMPLET)'}`);
 
   // Réinitialiser les stats de cache
   resetCacheStats();
@@ -107,15 +109,21 @@ router.post('/', upload.array('files'), async (req, res) => {
     let globalTotalLines = 0;
     let globalProcessedLines = 0;
 
-    // Première passe : compter le total de lignes
+    // Première passe : parser les fichiers et compter les lignes
     const filesData = [];
     for (const file of files) {
+      console.log(`[Parsing] Début parsing de ${file.originalname} (${(file.size / 1024 / 1024).toFixed(2)} MB)...`);
+      const parseStart = Date.now();
+      
       const { rows, sourceTexts } = await parseCSV(file.buffer);
+      
+      console.log(`[Parsing] Terminé en ${Date.now() - parseStart}ms - ${sourceTexts.length} lignes trouvées`);
       
       // Mode test : limiter les lignes à traduire
       let textsToTranslate = sourceTexts;
       if (testMode) {
         textsToTranslate = sourceTexts.slice(0, testLines);
+        console.log(`[Mode Test] Limitation à ${textsToTranslate.length} lignes`);
       }
       
       filesData.push({ file, rows, sourceTexts: textsToTranslate, allSourceTexts: sourceTexts });

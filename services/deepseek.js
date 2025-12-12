@@ -88,9 +88,12 @@ async function translateBatch(texts, targetLanguage, apiKey) {
 
   let lastError = null;
 
+  console.log(`[DeepSeek] Envoi batch de ${texts.length} textes...`);
+
   // Retry avec backoff exponentiel
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
+      const fetchStart = Date.now();
       const response = await fetch(DEEPSEEK_API_URL, {
         method: 'POST',
         headers: {
@@ -115,6 +118,8 @@ async function translateBatch(texts, targetLanguage, apiKey) {
       }
 
       const data = await response.json();
+      
+      console.log(`[DeepSeek] Réponse reçue en ${Date.now() - fetchStart}ms`);
       
       // Mise à jour des stats de cache
       if (data.usage) {
