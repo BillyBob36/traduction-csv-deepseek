@@ -1,0 +1,17 @@
+# Configuration de déploiement Render
+# https://render.com/docs/yaml-spec
+
+services:
+  - type: web
+    name: csv-translator-deepseek
+    env: node
+    region: frankfurt # Plus proche de l'Europe
+    plan: starter # $7/mois - 512MB RAM
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DEEPSEEK_API_KEY
+        sync: false # À configurer manuellement dans le dashboard Render

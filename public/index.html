@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Traducteur CSV - DeepSeek</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <i class="fas fa-language"></i>
+        <h1>Traducteur CSV</h1>
+      </div>
+      <p class="subtitle">Traduction de fichiers CSV volumineux via DeepSeek AI</p>
+    </header>
+
+    <!-- Zone d'upload -->
+    <section class="upload-section">
+      <div class="upload-zone" id="uploadZone">
+        <i class="fas fa-cloud-upload-alt upload-icon"></i>
+        <h3>Glissez vos fichiers CSV ici</h3>
+        <p>ou cliquez pour sélectionner</p>
+        <input type="file" id="fileInput" multiple accept=".csv" hidden>
+        <button class="btn btn-secondary" id="selectFilesBtn">
+          <i class="fas fa-folder-open"></i> Sélectionner des fichiers
+        </button>
+      </div>
+
+      <!-- Liste des fichiers sélectionnés -->
+      <div class="files-list" id="filesList" hidden>
+        <h4><i class="fas fa-file-csv"></i> Fichiers sélectionnés</h4>
+        <ul id="filesListItems"></ul>
+        <button class="btn btn-link" id="clearFilesBtn">
+          <i class="fas fa-times"></i> Tout effacer
+        </button>
+      </div>
+    </section>
+
+    <!-- Sélection de la langue -->
+    <section class="language-section" id="languageSection" hidden>
+      <h4><i class="fas fa-globe"></i> Langue de destination</h4>
+      <select id="languageSelect" class="language-select">
+        <option value="">-- Choisir une langue --</option>
+      </select>
+    </section>
+
+    <!-- Estimation du coût -->
+    <section class="estimate-section" id="estimateSection" hidden>
+      <h4><i class="fas fa-calculator"></i> Estimation</h4>
+      <div class="estimate-grid">
+        <div class="estimate-item">
+          <span class="estimate-label">Fichiers</span>
+          <span class="estimate-value" id="estFiles">0</span>
+        </div>
+        <div class="estimate-item">
+          <span class="estimate-label">Lignes à traduire</span>
+          <span class="estimate-value" id="estLines">0</span>
+        </div>
+        <div class="estimate-item">
+          <span class="estimate-label">Coût estimé</span>
+          <span class="estimate-value" id="estCost">$0.00</span>
+        </div>
+        <div class="estimate-item">
+          <span class="estimate-label">Temps estimé</span>
+          <span class="estimate-value" id="estTime">0 min</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bouton de lancement -->
+    <section class="action-section" id="actionSection" hidden>
+      <button class="btn btn-primary btn-large" id="translateBtn">
+        <i class="fas fa-play"></i> Lancer la traduction
+      </button>
+    </section>
+
+    <!-- Progression -->
+    <section class="progress-section" id="progressSection" hidden>
+      <h4><i class="fas fa-spinner fa-spin"></i> Traduction en cours...</h4>
+      
+      <!-- Progression globale -->
+      <div class="progress-global">
+        <div class="progress-header">
+          <span>Progression globale</span>
+          <span id="progressPercent">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-stats">
+          <span><i class="fas fa-file-alt"></i> <span id="progressFiles">0/0</span> fichiers</span>
+          <span><i class="fas fa-align-left"></i> <span id="progressLines">0/0</span> lignes</span>
+        </div>
+      </div>
+
+      <!-- Fichier en cours -->
+      <div class="current-file" id="currentFile">
+        <span class="current-file-label">Fichier en cours :</span>
+        <span class="current-file-name" id="currentFileName">-</span>
+      </div>
+
+      <!-- Stats de cache -->
+      <div class="cache-stats" id="cacheStats">
+        <div class="cache-stat">
+          <span class="cache-label">Cache Hit Rate</span>
+          <span class="cache-value" id="cacheHitRate">0%</span>
+        </div>
+        <div class="cache-stat">
+          <span class="cache-label">Coût actuel</span>
+          <span class="cache-value" id="currentCost">$0.00</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Résultats -->
+    <section class="results-section" id="resultsSection" hidden>
+      <h4><i class="fas fa-check-circle"></i> Traduction terminée !</h4>
+      
+      <div class="results-summary">
+        <div class="result-item">
+          <i class="fas fa-clock"></i>
+          <span>Durée : <strong id="resultDuration">0s</strong></span>
+        </div>
+        <div class="result-item">
+          <i class="fas fa-database"></i>
+          <span>Cache Hit : <strong id="resultCacheHit">0%</strong></span>
+        </div>
+        <div class="result-item">
+          <i class="fas fa-dollar-sign"></i>
+          <span>Coût final : <strong id="resultCost">$0.00</strong></span>
+        </div>
+      </div>
+
+      <div class="download-section">
+        <button class="btn btn-success btn-large" id="downloadAllBtn">
+          <i class="fas fa-download"></i> Télécharger tous les fichiers (ZIP)
+        </button>
+      </div>
+
+      <div class="individual-downloads" id="individualDownloads">
+        <!-- Fichiers individuels ajoutés dynamiquement -->
+      </div>
+
+      <button class="btn btn-secondary" id="newTranslationBtn">
+        <i class="fas fa-redo"></i> Nouvelle traduction
+      </button>
+    </section>
+
+    <!-- Erreurs -->
+    <section class="error-section" id="errorSection" hidden>
+      <div class="error-box">
+        <i class="fas fa-exclamation-triangle"></i>
+        <h4>Erreur</h4>
+        <p id="errorMessage"></p>
+        <button class="btn btn-secondary" id="retryBtn">
+          <i class="fas fa-redo"></i> Réessayer
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

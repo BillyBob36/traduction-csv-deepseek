@@ -1,0 +1,23 @@
+# Dépendances
+node_modules/
+
+# Variables d'environnement (contient la clé API)
+.env
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Fichiers temporaires
+tmp/
+temp/
+*.tmp
