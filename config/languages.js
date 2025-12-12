@@ -16,7 +16,8 @@ const LANGUAGES = {
   da: { name: 'Danois', nativeName: 'Dansk' },
   zh: { name: 'Chinois simplifié', nativeName: '简体中文' },
   ja: { name: 'Japonais', nativeName: '日本語' },
-  ko: { name: 'Coréen', nativeName: '한국어' }
+  ko: { name: 'Coréen', nativeName: '한국어' },
+  fi: { name: 'Finnois', nativeName: 'Suomi' }
 };
 
 module.exports = LANGUAGES;

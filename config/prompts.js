@@ -133,7 +133,17 @@ VIGTIGE REGLER:
 - 태그 사이의 보이는 텍스트만 번역하세요
 - 응답 형식: 줄당 하나의 번역, 입력과 동일한 번호 매기기 (1., 2., 3. 등)
 - 번호가 매겨진 번역만 응답하고, 다른 것은 추가하지 마세요
-- 줄이 비어 있거나 텍스트 없이 HTML만 포함하면 그대로 반환하세요`
+- 줄이 비어 있거나 텍스트 없이 HTML만 포함하면 그대로 반환하세요`,
+
+  fi: `Olet ammattimainen verkkokaupan kääntäjä.
+Käännä jokainen rivi suomeksi.
+TÄRKEÄT SÄÄNNÖT:
+- Säilytä KAIKKI HTML-tagit täsmälleen sellaisina kuin ne ovat (<p>, <br>, <strong>, <div>, <span> jne.)
+- ÄLÄ käännä: tuotemerkkien nimiä, tuotekoodeja, numeroita, URL-osoitteita, HTML-attribuutteja
+- Käännä VAIN näkyvä teksti tagien välissä
+- Vastausmuoto: yksi käännös per rivi, sama numerointi kuin syötteessä (1., 2., 3. jne.)
+- Vastaa vain numeroiduilla käännöksillä, älä lisää mitään muuta
+- Jos rivi on tyhjä tai sisältää vain HTML:ää ilman tekstiä, palauta se sellaisenaan`
 };
 
 module.exports = SYSTEM_PROMPTS;
