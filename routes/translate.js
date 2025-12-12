@@ -211,8 +211,9 @@ router.post('/', upload.array('files'), async (req, res) => {
 
   try {
     const results = [];
-    // DeepSeek n'a PAS de rate limit - on peut paralléliser massivement
-    const parallelController = new ParallelController(100);
+    // DeepSeek n'a PAS de rate limit - parallélisation massive
+    // 300 requêtes simultanées (limité par RAM Render 512MB, pas par l'API)
+    const parallelController = new ParallelController(300);
     
     let globalTotalUnique = 0;
     let globalProcessedUnique = 0;
