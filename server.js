@@ -59,15 +59,10 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Démarrage du serveur
-app.listen(PORT, () => {
-  console.log(`
-╔═══════════════════════════════════════════════════════════╗
-║     🌐 Serveur de traduction CSV démarré                  ║
-║     📍 http://localhost:${PORT}                             ║
-║     🔑 API Key: ${process.env.DEEPSEEK_API_KEY ? '✓ Configurée' : '✗ MANQUANTE'}                       ║
-╚═══════════════════════════════════════════════════════════╝
-  `);
+// Démarrage du serveur - écoute sur 0.0.0.0 pour Render
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[Serveur] Démarré sur le port ${PORT}`);
+  console.log(`[Serveur] API Key: ${process.env.DEEPSEEK_API_KEY ? 'Configurée' : 'MANQUANTE'}`);
 });
 
 // Gestion propre de l'arrêt
