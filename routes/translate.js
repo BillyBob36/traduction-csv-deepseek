@@ -12,7 +12,8 @@ const path = require('path');
 const router = express.Router();
 
 const { parseCSV, insertTranslations, generateCSV, createBatches } = require('../services/csv');
-const { translateBatch, resetCacheStats, getCacheStats, ParallelController } = require('../services/deepseek');
+const { translateBatch: translateBatchDeepSeek, resetCacheStats, getCacheStats, ParallelController } = require('../services/deepseek');
+const { translateBatchOpenAI, resetOpenAIStats, getOpenAIStats, getTierLimits, TIER_LIMITS } = require('../services/openai');
 const LANGUAGES = require('../config/languages');
 
 // Répertoire temporaire pour les fichiers en cours
@@ -198,7 +199,12 @@ router.post('/', upload.array('files'), async (req, res) => {
   const testMode = req.body.testMode === 'true';
   const testLines = parseInt(req.body.testLines) || 10;
 
-  console.log(`[Debug] testMode: ${testMode}, testLines: ${testLines}`);
+  // Choix du LLM provider
+  const llmProvider = req.body.llmProvider || 'deepseek'; // 'deepseek' ou 'openai'
+  const openaiApiKey = req.body.openaiApiKey || '';
+  const openaiTier = parseInt(req.body.openaiTier) || 3;
+
+  console.log(`[Debug] testMode: ${testMode}, testLines: ${testLines}, provider: ${llmProvider}`);
 
   // Validation
   if (!files || files.length === 0) {
@@ -212,29 +218,51 @@ router.post('/', upload.array('files'), async (req, res) => {
     });
   }
 
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: 'Clé API DeepSeek non configurée' });
+  // Validation de la clé API selon le provider
+  let apiKey;
+  if (llmProvider === 'openai') {
+    if (!openaiApiKey) {
+      return res.status(400).json({ error: 'Clé API OpenAI requise' });
+    }
+    apiKey = openaiApiKey;
+  } else {
+    apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Clé API DeepSeek non configurée' });
+    }
   }
 
-  console.log(`[Traduction] Début - ${files.length} fichier(s), langue: ${targetLanguage}${testMode ? ` (MODE TEST: ${testLines} lignes max)` : ' (COMPLET)'}`);
+  // Déterminer le niveau de parallélisation selon le provider
+  let maxParallel;
+  if (llmProvider === 'openai') {
+    const tierLimits = getTierLimits(openaiTier);
+    maxParallel = tierLimits.maxParallel;
+    console.log(`[OpenAI] Tier ${openaiTier}: ${tierLimits.rpm} RPM, ${maxParallel} requêtes parallèles`);
+  } else {
+    maxParallel = 300; // DeepSeek n'a pas de rate limit
+  }
 
-  // Réinitialiser les stats de cache
-  resetCacheStats();
+  console.log(`[Traduction] Début - ${files.length} fichier(s), langue: ${targetLanguage}, provider: ${llmProvider}${testMode ? ` (MODE TEST: ${testLines} lignes max)` : ' (COMPLET)'}`);
+
+  // Réinitialiser les stats selon le provider
+  if (llmProvider === 'openai') {
+    resetOpenAIStats();
+  } else {
+    resetCacheStats();
+  }
 
   // Enregistrer la session active
   activeSessions.set(sessionId, {
     status: 'running',
     startTime,
     targetLanguage,
+    llmProvider,
     files: files.map(f => f.originalname)
   });
 
   try {
     const results = [];
-    // DeepSeek n'a PAS de rate limit - parallélisation massive
-    // 300 requêtes simultanées (limité par RAM Render 512MB, pas par l'API)
-    const parallelController = new ParallelController(300);
+    const parallelController = new ParallelController(maxParallel);
     
     let globalTotalUnique = 0;
     let globalProcessedUnique = 0;
@@ -310,7 +338,15 @@ router.post('/', upload.array('files'), async (req, res) => {
           const texts = batch.map(item => item.text);
           
           try {
-            const { translations } = await translateBatch(texts, targetLanguage, apiKey);
+            // Appeler le bon provider
+            let translations;
+            if (llmProvider === 'openai') {
+              const result = await translateBatchOpenAI(texts, targetLanguage, apiKey, openaiTier);
+              translations = result.translations;
+            } else {
+              const result = await translateBatchDeepSeek(texts, targetLanguage, apiKey);
+              translations = result.translations;
+            }
             
             // Sauvegarder chaque traduction dans le fichier temp
             for (let i = 0; i < batch.length; i++) {
@@ -327,6 +363,7 @@ router.post('/', upload.array('files'), async (req, res) => {
               const linesForThisText = originalIndices.length;
               
               // Envoyer update de progression (throttled)
+              const stats = llmProvider === 'openai' ? getOpenAIStats() : getCacheStats();
               sendSSEThrottled(sessionId, {
                 type: 'progress',
                 fileIndex,
@@ -338,7 +375,8 @@ router.post('/', upload.array('files'), async (req, res) => {
                 globalProcessedLines: Math.round((globalProcessedUnique / globalTotalUnique) * globalTotalOriginal),
                 globalTotalLines: globalTotalOriginal,
                 percentComplete: Math.round((globalProcessedUnique / globalTotalUnique) * 100),
-                cacheStats: getCacheStats()
+                llmProvider,
+                cacheStats: stats
               });
             }
 
@@ -403,13 +441,18 @@ router.post('/', upload.array('files'), async (req, res) => {
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    const finalStats = getCacheStats();
+    const finalStats = llmProvider === 'openai' ? getOpenAIStats() : getCacheStats();
 
-    console.log(`[Traduction] Terminé en ${duration}s - Cache hit: ${finalStats.hitRate}% - Dédup: ${globalTotalOriginal} → ${globalTotalUnique}`);
+    if (llmProvider === 'openai') {
+      console.log(`[Traduction] Terminé en ${duration}s - OpenAI - Coût: $${finalStats.estimatedCost} - Dédup: ${globalTotalOriginal} → ${globalTotalUnique}`);
+    } else {
+      console.log(`[Traduction] Terminé en ${duration}s - DeepSeek - Cache hit: ${finalStats.hitRate}% - Dédup: ${globalTotalOriginal} → ${globalTotalUnique}`);
+    }
 
     sendSSE(sessionId, {
       type: 'complete',
       duration,
+      llmProvider,
       cacheStats: finalStats,
       deduplication: {
         original: globalTotalOriginal,
@@ -526,6 +569,20 @@ router.get('/status/:sessionId', (req, res) => {
  */
 router.get('/languages', (req, res) => {
   res.json(LANGUAGES);
+});
+
+/**
+ * Route pour récupérer les infos sur les tiers OpenAI
+ */
+router.get('/openai-tiers', (req, res) => {
+  res.json({
+    tiers: TIER_LIMITS,
+    model: 'gpt-4o-mini',
+    pricing: {
+      input: 0.15,  // $ par million tokens
+      output: 0.60  // $ par million tokens
+    }
+  });
 });
 
 /**

@@ -49,6 +49,47 @@
       </select>
     </section>
 
+    <!-- Choix du LLM -->
+    <section class="llm-section" id="llmSection" hidden>
+      <h4><i class="fas fa-robot"></i> Modèle de traduction</h4>
+      <div class="llm-options">
+        <label class="llm-option">
+          <input type="radio" name="llmProvider" value="deepseek" checked>
+          <div class="llm-card">
+            <span class="llm-name">DeepSeek</span>
+            <span class="llm-price">~$0.14/M tokens</span>
+            <span class="llm-info">Pas de rate limit</span>
+          </div>
+        </label>
+        <label class="llm-option">
+          <input type="radio" name="llmProvider" value="openai">
+          <div class="llm-card">
+            <span class="llm-name">OpenAI GPT-4o-mini</span>
+            <span class="llm-price">$0.15-0.60/M tokens</span>
+            <span class="llm-info">Rate limit selon tier</span>
+          </div>
+        </label>
+      </div>
+      
+      <!-- Configuration OpenAI (visible si OpenAI sélectionné) -->
+      <div class="openai-config" id="openaiConfig" hidden>
+        <div class="config-row">
+          <label for="openaiApiKey">Clé API OpenAI :</label>
+          <input type="password" id="openaiApiKey" placeholder="sk-..." class="input-text">
+        </div>
+        <div class="config-row">
+          <label for="openaiTier">Votre Tier :</label>
+          <select id="openaiTier" class="input-select">
+            <option value="1">Tier 1 (500 RPM)</option>
+            <option value="2">Tier 2 (500 RPM, 2M TPM)</option>
+            <option value="3" selected>Tier 3 (5,000 RPM)</option>
+            <option value="4">Tier 4 (10,000 RPM)</option>
+            <option value="5">Tier 5 (30,000 RPM)</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
     <!-- Estimation du coût -->
     <section class="estimate-section" id="estimateSection" hidden>
       <h4><i class="fas fa-calculator"></i> Estimation</h4>

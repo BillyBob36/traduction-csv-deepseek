@@ -12,7 +12,10 @@ const state = {
   translatedFiles: [],
   isTranslating: false,
   testMode: false,
-  testLines: 10
+  testLines: 10,
+  llmProvider: 'deepseek',
+  openaiApiKey: '',
+  openaiTier: 3
 };
 
 // Éléments DOM
@@ -56,7 +59,13 @@ const elements = {
   testModeCheckbox: document.getElementById('testModeCheckbox'),
   testLinesInput: document.getElementById('testLinesInput'),
   testLinesCount: document.getElementById('testLinesCount'),
-  testBtn: document.getElementById('testBtn')
+  testBtn: document.getElementById('testBtn'),
+  // LLM Provider
+  llmSection: document.getElementById('llmSection'),
+  llmProviderRadios: document.getElementsByName('llmProvider'),
+  openaiConfig: document.getElementById('openaiConfig'),
+  openaiApiKey: document.getElementById('openaiApiKey'),
+  openaiTier: document.getElementById('openaiTier')
 };
 
 /**
@@ -156,6 +165,24 @@ function setupEventListeners() {
   // Test button
   elements.testBtn.addEventListener('click', () => startTranslation(true));
 
+  // LLM Provider selection
+  elements.llmProviderRadios.forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      state.llmProvider = e.target.value;
+      elements.openaiConfig.hidden = state.llmProvider !== 'openai';
+    });
+  });
+
+  // OpenAI API Key
+  elements.openaiApiKey.addEventListener('input', (e) => {
+    state.openaiApiKey = e.target.value;
+  });
+
+  // OpenAI Tier
+  elements.openaiTier.addEventListener('change', (e) => {
+    state.openaiTier = parseInt(e.target.value);
+  });
+
   // Download buttons
   elements.downloadAllBtn.addEventListener('click', downloadAll);
   elements.newTranslationBtn.addEventListener('click', resetApp);
@@ -240,6 +267,7 @@ function updateUI() {
 
   elements.filesList.hidden = !hasFiles;
   elements.languageSection.hidden = !hasFiles;
+  elements.llmSection.hidden = !(hasFiles && hasLanguage);
   elements.estimateSection.hidden = !(hasFiles && hasLanguage);
   elements.testSection.hidden = !(hasFiles && hasLanguage);
   elements.actionSection.hidden = !(hasFiles && hasLanguage);
@@ -281,6 +309,12 @@ async function getEstimate() {
 async function startTranslation(isTest = false) {
   if (state.isTranslating) return;
 
+  // Validation OpenAI
+  if (state.llmProvider === 'openai' && !state.openaiApiKey) {
+    showError('Veuillez entrer votre clé API OpenAI');
+    return;
+  }
+
   state.isTranslating = true;
   state.sessionId = `session_${Date.now()}`;
   state.translatedFiles = [];
@@ -289,6 +323,7 @@ async function startTranslation(isTest = false) {
   elements.actionSection.hidden = true;
   elements.estimateSection.hidden = true;
   elements.testSection.hidden = true;
+  elements.llmSection.hidden = true;
   elements.errorSection.hidden = true;
   elements.resultsSection.hidden = true;
   elements.progressSection.hidden = false;
@@ -304,6 +339,13 @@ async function startTranslation(isTest = false) {
   state.files.forEach(file => formData.append('files', file));
   formData.append('targetLanguage', state.selectedLanguage);
   formData.append('sessionId', state.sessionId);
+
+  // LLM Provider
+  formData.append('llmProvider', state.llmProvider);
+  if (state.llmProvider === 'openai') {
+    formData.append('openaiApiKey', state.openaiApiKey);
+    formData.append('openaiTier', state.openaiTier.toString());
+  }
 
   // Mode test : limiter le nombre de lignes
   if (isTest) {
@@ -535,6 +577,7 @@ function resetApp() {
   elements.progressSection.hidden = true;
   elements.filesList.hidden = true;
   elements.languageSection.hidden = true;
+  elements.llmSection.hidden = true;
   elements.estimateSection.hidden = true;
   elements.testSection.hidden = true;
   elements.actionSection.hidden = true;
@@ -545,6 +588,15 @@ function resetApp() {
   elements.testLinesInput.hidden = true;
   elements.testBtn.hidden = true;
   elements.translateBtn.hidden = false;
+
+  // Reset LLM provider
+  state.llmProvider = 'deepseek';
+  state.openaiApiKey = '';
+  state.openaiTier = 3;
+  elements.llmProviderRadios[0].checked = true; // DeepSeek
+  elements.openaiConfig.hidden = true;
+  elements.openaiApiKey.value = '';
+  elements.openaiTier.value = '3';
 }
 
 /**
