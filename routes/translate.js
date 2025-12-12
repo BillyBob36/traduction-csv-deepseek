@@ -1,18 +1,29 @@
 /**
  * Routes de traduction CSV
  * Gère l'upload multiple, le traitement parallèle et les SSE pour la progression
+ * Avec déduplication des textes et sauvegarde incrémentale
  */
 
 const express = require('express');
 const multer = require('multer');
 const archiver = require('archiver');
+const fs = require('fs');
+const path = require('path');
 const router = express.Router();
 
 const { parseCSV, insertTranslations, generateCSV, createBatches } = require('../services/csv');
 const { translateBatch, resetCacheStats, getCacheStats, ParallelController } = require('../services/deepseek');
 const LANGUAGES = require('../config/languages');
 
-// Configuration multer pour upload en mémoire (streaming)
+// Répertoire temporaire pour les fichiers en cours
+const TEMP_DIR = process.env.TEMP_DIR || '/tmp/csv-translator';
+
+// S'assurer que le répertoire temp existe
+if (!fs.existsSync(TEMP_DIR)) {
+  fs.mkdirSync(TEMP_DIR, { recursive: true });
+}
+
+// Configuration multer pour upload en mémoire
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -30,6 +41,9 @@ const upload = multer({
 
 // Map pour stocker les sessions SSE actives
 const sseClients = new Map();
+
+// Map pour stocker les sessions de traduction en cours (pour téléchargement temp)
+const activeSessions = new Map();
 
 /**
  * Route SSE pour la progression en temps réel
@@ -65,6 +79,91 @@ function sendSSE(sessionId, data) {
 }
 
 /**
+ * Crée un dictionnaire de déduplication des textes
+ * @param {Array} sourceTexts - Tableau de {index, text}
+ * @returns {Object} - {uniqueTexts: [{text, indices}], totalOriginal, totalUnique}
+ */
+function createDeduplicationDict(sourceTexts) {
+  const textToIndices = new Map();
+  
+  for (const item of sourceTexts) {
+    const text = item.text;
+    if (textToIndices.has(text)) {
+      textToIndices.get(text).push(item.index);
+    } else {
+      textToIndices.set(text, [item.index]);
+    }
+  }
+  
+  // Convertir en tableau pour le batching
+  const uniqueTexts = [];
+  for (const [text, indices] of textToIndices) {
+    uniqueTexts.push({ text, indices });
+  }
+  
+  return {
+    uniqueTexts,
+    totalOriginal: sourceTexts.length,
+    totalUnique: uniqueTexts.length,
+    deduplicationRatio: sourceTexts.length > 0 
+      ? ((1 - uniqueTexts.length / sourceTexts.length) * 100).toFixed(1)
+      : 0
+  };
+}
+
+/**
+ * Sauvegarde les traductions dans un fichier temporaire (JSON lines)
+ */
+function saveTempTranslation(sessionId, fileIndex, text, translation, indices) {
+  const tempFile = path.join(TEMP_DIR, `${sessionId}_${fileIndex}.jsonl`);
+  const line = JSON.stringify({ text, translation, indices }) + '\n';
+  fs.appendFileSync(tempFile, line);
+}
+
+/**
+ * Charge les traductions depuis le fichier temporaire
+ */
+function loadTempTranslations(sessionId, fileIndex) {
+  const tempFile = path.join(TEMP_DIR, `${sessionId}_${fileIndex}.jsonl`);
+  const translationsMap = new Map();
+  
+  if (fs.existsSync(tempFile)) {
+    const content = fs.readFileSync(tempFile, 'utf-8');
+    const lines = content.split('\n').filter(l => l.trim());
+    
+    for (const line of lines) {
+      try {
+        const { translation, indices } = JSON.parse(line);
+        for (const idx of indices) {
+          translationsMap.set(idx, translation);
+        }
+      } catch (e) {
+        // Ignorer les lignes malformées
+      }
+    }
+  }
+  
+  return translationsMap;
+}
+
+/**
+ * Supprime les fichiers temporaires d'une session
+ */
+function cleanupTempFiles(sessionId) {
+  try {
+    const files = fs.readdirSync(TEMP_DIR);
+    for (const file of files) {
+      if (file.startsWith(sessionId)) {
+        fs.unlinkSync(path.join(TEMP_DIR, file));
+      }
+    }
+    console.log(`[Cleanup] Fichiers temp supprimés pour session ${sessionId}`);
+  } catch (error) {
+    console.error(`[Cleanup] Erreur:`, error.message);
+  }
+}
+
+/**
  * Route principale de traduction
  * POST /api/translate
  */
@@ -78,7 +177,7 @@ router.post('/', upload.array('files'), async (req, res) => {
   const testMode = req.body.testMode === 'true';
   const testLines = parseInt(req.body.testLines) || 10;
 
-  console.log(`[Debug] testMode: ${testMode}, testLines: ${testLines}, body:`, req.body);
+  console.log(`[Debug] testMode: ${testMode}, testLines: ${testLines}`);
 
   // Validation
   if (!files || files.length === 0) {
@@ -102,16 +201,23 @@ router.post('/', upload.array('files'), async (req, res) => {
   // Réinitialiser les stats de cache
   resetCacheStats();
 
+  // Enregistrer la session active
+  activeSessions.set(sessionId, {
+    status: 'running',
+    startTime,
+    targetLanguage,
+    files: files.map(f => f.originalname)
+  });
+
   try {
     const results = [];
     // DeepSeek n'a PAS de rate limit - on peut paralléliser massivement
-    // Limité à 100 pour éviter de surcharger la RAM (512MB sur Render Starter)
     const parallelController = new ParallelController(100);
     
-    let globalTotalLines = 0;
-    let globalProcessedLines = 0;
+    let globalTotalUnique = 0;
+    let globalProcessedUnique = 0;
 
-    // Première passe : parser les fichiers et compter les lignes
+    // Première passe : parser les fichiers, dédupliquer et compter
     const filesData = [];
     for (const file of files) {
       console.log(`[Parsing] Début parsing de ${file.originalname} (${(file.size / 1024 / 1024).toFixed(2)} MB)...`);
@@ -128,33 +234,51 @@ router.post('/', upload.array('files'), async (req, res) => {
         console.log(`[Mode Test] Limitation à ${textsToTranslate.length} lignes`);
       }
       
-      filesData.push({ file, rows, sourceTexts: textsToTranslate, allSourceTexts: sourceTexts });
-      globalTotalLines += textsToTranslate.length;
+      // DÉDUPLICATION : créer le dictionnaire des textes uniques
+      const dedup = createDeduplicationDict(textsToTranslate);
+      console.log(`[Déduplication] ${dedup.totalOriginal} lignes → ${dedup.totalUnique} uniques (${dedup.deduplicationRatio}% économisé)`);
+      
+      filesData.push({ 
+        file, 
+        rows, 
+        sourceTexts: textsToTranslate,
+        uniqueTexts: dedup.uniqueTexts,
+        dedup
+      });
+      globalTotalUnique += dedup.totalUnique;
     }
+
+    // Calculer le total original pour l'affichage
+    const globalTotalOriginal = filesData.reduce((sum, f) => sum + f.dedup.totalOriginal, 0);
 
     sendSSE(sessionId, {
       type: 'init',
       totalFiles: files.length,
-      totalLines: globalTotalLines
+      totalLines: globalTotalOriginal,
+      totalUnique: globalTotalUnique,
+      deduplicationSaved: globalTotalOriginal - globalTotalUnique
     });
 
     // Traitement de chaque fichier
     for (let fileIndex = 0; fileIndex < filesData.length; fileIndex++) {
-      const { file, rows, sourceTexts } = filesData[fileIndex];
+      const { file, rows, uniqueTexts, dedup } = filesData[fileIndex];
       const fileName = file.originalname;
 
-      console.log(`[Fichier ${fileIndex + 1}/${files.length}] ${fileName} - ${sourceTexts.length} lignes à traduire`);
+      console.log(`[Fichier ${fileIndex + 1}/${files.length}] ${fileName} - ${dedup.totalUnique} textes uniques à traduire`);
 
       sendSSE(sessionId, {
         type: 'file_start',
         fileIndex,
         fileName,
-        linesToTranslate: sourceTexts.length
+        linesToTranslate: dedup.totalOriginal,
+        uniqueToTranslate: dedup.totalUnique
       });
 
-      // Créer les batches de 25 lignes (plus petits = meilleure parallélisation)
-      const batches = createBatches(sourceTexts, 25);
-      const translationsMap = new Map();
+      // Créer les batches de 25 textes uniques
+      const batches = createBatches(
+        uniqueTexts.map((u, i) => ({ index: i, text: u.text, indices: u.indices })), 
+        25
+      );
       let fileProcessedBatches = 0;
 
       // Traiter les batches en parallèle
@@ -165,13 +289,22 @@ router.post('/', upload.array('files'), async (req, res) => {
           try {
             const { translations } = await translateBatch(texts, targetLanguage, apiKey);
             
-            // Mapper les traductions aux index originaux
+            // Sauvegarder chaque traduction dans le fichier temp
             batch.forEach((item, i) => {
-              translationsMap.set(item.index, translations[i] || '');
+              const translation = translations[i] || '';
+              // Récupérer les indices originaux depuis uniqueTexts
+              const originalIndices = uniqueTexts[item.index].indices;
+              saveTempTranslation(sessionId, fileIndex, item.text, translation, originalIndices);
             });
 
             fileProcessedBatches++;
-            globalProcessedLines += batch.length;
+            globalProcessedUnique += batch.length;
+
+            // Calculer la progression en termes de lignes originales traitées
+            const processedOriginalLines = filesData
+              .slice(0, fileIndex)
+              .reduce((sum, f) => sum + f.dedup.totalOriginal, 0) +
+              Math.round((fileProcessedBatches / batches.length) * dedup.totalOriginal);
 
             // Envoyer la progression
             sendSSE(sessionId, {
@@ -180,25 +313,31 @@ router.post('/', upload.array('files'), async (req, res) => {
               fileName,
               fileBatchesProcessed: fileProcessedBatches,
               fileTotalBatches: batches.length,
-              globalProcessedLines,
-              globalTotalLines,
-              percentComplete: Math.round((globalProcessedLines / globalTotalLines) * 100),
+              globalProcessedUnique,
+              globalTotalUnique,
+              globalProcessedLines: processedOriginalLines,
+              globalTotalLines: globalTotalOriginal,
+              percentComplete: Math.round((globalProcessedUnique / globalTotalUnique) * 100),
               cacheStats: getCacheStats()
             });
 
           } catch (error) {
             console.error(`[Batch ${batchIndex}] Erreur:`, error.message);
-            // En cas d'erreur, on laisse les traductions vides
+            // En cas d'erreur, sauvegarder avec message d'erreur
             batch.forEach(item => {
-              translationsMap.set(item.index, `[ERREUR: ${error.message}]`);
+              const originalIndices = uniqueTexts[item.index].indices;
+              saveTempTranslation(sessionId, fileIndex, item.text, `[ERREUR: ${error.message}]`, originalIndices);
             });
-            globalProcessedLines += batch.length;
+            globalProcessedUnique += batch.length;
           }
         })
       );
 
       // Attendre que tous les batches soient traités
       await Promise.all(batchPromises);
+
+      // Charger les traductions depuis le fichier temp
+      const translationsMap = loadTempTranslations(sessionId, fileIndex);
 
       // Insérer les traductions dans les rows
       insertTranslations(rows, translationsMap);
@@ -213,7 +352,8 @@ router.post('/', upload.array('files'), async (req, res) => {
         originalName: fileName,
         translatedName: fileName.replace('.csv', `${suffix}.csv`),
         content: translatedCSV,
-        linesTranslated: sourceTexts.length
+        linesTranslated: dedup.totalOriginal,
+        uniqueTranslated: dedup.totalUnique
       });
 
       sendSSE(sessionId, {
@@ -226,13 +366,22 @@ router.post('/', upload.array('files'), async (req, res) => {
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     const finalStats = getCacheStats();
 
-    console.log(`[Traduction] Terminé en ${duration}s - Cache hit: ${finalStats.hitRate}%`);
+    console.log(`[Traduction] Terminé en ${duration}s - Cache hit: ${finalStats.hitRate}% - Dédup: ${globalTotalOriginal} → ${globalTotalUnique}`);
 
     sendSSE(sessionId, {
       type: 'complete',
       duration,
-      cacheStats: finalStats
+      cacheStats: finalStats,
+      deduplication: {
+        original: globalTotalOriginal,
+        unique: globalTotalUnique,
+        saved: globalTotalOriginal - globalTotalUnique
+      }
     });
+
+    // Nettoyer les fichiers temporaires
+    cleanupTempFiles(sessionId);
+    activeSessions.delete(sessionId);
 
     // Si un seul fichier, retourner directement le CSV
     if (results.length === 1) {
@@ -262,8 +411,73 @@ router.post('/', upload.array('files'), async (req, res) => {
       message: error.message
     });
 
+    // Nettoyer en cas d'erreur aussi
+    cleanupTempFiles(sessionId);
+    activeSessions.delete(sessionId);
+
     res.status(500).json({ error: error.message });
   }
+});
+
+/**
+ * Route pour télécharger le fichier temporaire en cours de traduction
+ * GET /api/translate/temp/:sessionId/:fileIndex
+ */
+router.get('/temp/:sessionId/:fileIndex', (req, res) => {
+  const { sessionId, fileIndex } = req.params;
+  const tempFile = path.join(TEMP_DIR, `${sessionId}_${fileIndex}.jsonl`);
+  
+  if (!fs.existsSync(tempFile)) {
+    return res.status(404).json({ error: 'Fichier temporaire non trouvé' });
+  }
+  
+  // Lire et convertir en format lisible
+  const content = fs.readFileSync(tempFile, 'utf-8');
+  const lines = content.split('\n').filter(l => l.trim());
+  
+  const translations = lines.map(line => {
+    try {
+      return JSON.parse(line);
+    } catch (e) {
+      return null;
+    }
+  }).filter(Boolean);
+  
+  res.json({
+    sessionId,
+    fileIndex: parseInt(fileIndex),
+    translationsCount: translations.length,
+    translations: translations.slice(-50) // Dernières 50 traductions
+  });
+});
+
+/**
+ * Route pour obtenir le statut d'une session
+ * GET /api/translate/status/:sessionId
+ */
+router.get('/status/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+  const session = activeSessions.get(sessionId);
+  
+  if (!session) {
+    return res.status(404).json({ error: 'Session non trouvée ou terminée' });
+  }
+  
+  // Compter les traductions dans les fichiers temp
+  const tempFiles = fs.readdirSync(TEMP_DIR).filter(f => f.startsWith(sessionId));
+  let totalTranslations = 0;
+  
+  for (const file of tempFiles) {
+    const content = fs.readFileSync(path.join(TEMP_DIR, file), 'utf-8');
+    totalTranslations += content.split('\n').filter(l => l.trim()).length;
+  }
+  
+  res.json({
+    ...session,
+    tempFiles: tempFiles.length,
+    translationsCompleted: totalTranslations,
+    elapsedSeconds: Math.round((Date.now() - session.startTime) / 1000)
+  });
 });
 
 /**

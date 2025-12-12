@@ -385,17 +385,25 @@ function handleSSEMessage(data) {
     case 'init':
       elements.progressLines.textContent = `0/${data.totalLines.toLocaleString()}`;
       elements.progressFiles.textContent = `0/${data.totalFiles}`;
+      // Afficher info déduplication si disponible
+      if (data.totalUnique && data.deduplicationSaved > 0) {
+        console.log(`[Déduplication] ${data.totalLines} lignes → ${data.totalUnique} uniques (${data.deduplicationSaved} économisées)`);
+      }
       break;
 
     case 'file_start':
       elements.currentFileName.textContent = data.fileName;
+      // Afficher info déduplication du fichier
+      if (data.uniqueToTranslate) {
+        elements.currentFileName.textContent = `${data.fileName} (${data.uniqueToTranslate} uniques / ${data.linesToTranslate} lignes)`;
+      }
       break;
 
     case 'progress':
       updateProgress(
         data.percentComplete,
-        data.globalProcessedLines,
-        data.globalTotalLines
+        data.globalProcessedLines || 0,
+        data.globalTotalLines || 0
       );
       
       if (data.cacheStats) {
@@ -414,6 +422,10 @@ function handleSSEMessage(data) {
       elements.resultDuration.textContent = `${data.duration}s`;
       elements.resultCacheHit.textContent = `${data.cacheStats.hitRate}%`;
       elements.resultCost.textContent = `$${data.cacheStats.estimatedCost.toFixed(4)}`;
+      // Afficher économies de déduplication
+      if (data.deduplication) {
+        console.log(`[Résultat] Déduplication: ${data.deduplication.original} → ${data.deduplication.unique} (${data.deduplication.saved} économisées)`);
+      }
       break;
 
     case 'error':
