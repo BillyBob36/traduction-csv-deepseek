@@ -158,20 +158,46 @@ async function translateBatch(texts, targetLanguage, apiKey) {
 
 /**
  * Parse la réponse DeepSeek pour extraire les traductions
- * Gère le format numéroté (1. xxx, 2. yyy, etc.)
+ * Gère le format numéroté (1. xxx, 2. yyy, etc.) avec contenu multiligne
+ * Chaque traduction peut contenir du HTML avec des retours à la ligne
  */
 function parseTranslations(responseText, expectedCount) {
-  const lines = responseText.split('\n').filter(line => line.trim());
   const translations = [];
-
-  // Expression régulière pour matcher "1. texte" ou "1) texte" ou juste le texte
-  const numberedLineRegex = /^\d+[\.\)]\s*/;
-
-  for (const line of lines) {
-    // Retire le numéro de ligne si présent
-    const cleanedLine = line.replace(numberedLineRegex, '').trim();
-    if (cleanedLine) {
-      translations.push(cleanedLine);
+  
+  // Regex pour trouver les débuts de traduction numérotée (1. , 2. , etc.)
+  // On cherche un numéro en début de ligne suivi d'un point ou parenthèse
+  const splitRegex = /(?:^|\n)(\d+)[\.\)]\s*/g;
+  
+  // Trouver toutes les positions des numéros
+  const matches = [];
+  let match;
+  while ((match = splitRegex.exec(responseText)) !== null) {
+    matches.push({
+      number: parseInt(match[1]),
+      index: match.index,
+      fullMatchLength: match[0].length
+    });
+  }
+  
+  // Si aucun numéro trouvé, retourner le texte brut comme une seule traduction
+  if (matches.length === 0) {
+    const trimmed = responseText.trim();
+    if (trimmed) {
+      translations.push(trimmed);
+    }
+  } else {
+    // Extraire le contenu entre chaque numéro
+    for (let i = 0; i < matches.length; i++) {
+      const currentMatch = matches[i];
+      const startIndex = currentMatch.index + currentMatch.fullMatchLength;
+      
+      // Fin = début du prochain numéro ou fin du texte
+      const endIndex = (i + 1 < matches.length) 
+        ? matches[i + 1].index 
+        : responseText.length;
+      
+      const content = responseText.substring(startIndex, endIndex).trim();
+      translations.push(content);
     }
   }
 
