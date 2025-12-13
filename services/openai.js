@@ -67,7 +67,7 @@ async function translateBatchOpenAI(texts, targetLanguage, apiKey, tier = 3) {
     throw new Error(`Langue non supportée: ${targetLanguage}`);
   }
 
-  const userContent = texts.map((text, i) => `${i + 1}. ${text}`).join('\n');
+  const userContent = texts.map((text, i) => `[${i + 1}] ${text}`).join('\n');
   const tierLimits = getTierLimits(tier);
 
   const payload = {
@@ -152,7 +152,9 @@ async function translateBatchOpenAI(texts, targetLanguage, apiKey, tier = 3) {
  */
 function parseTranslations(responseText, expectedCount) {
   const translations = [];
-  const splitRegex = /(?:^|\n)(\d+)[\.\)]\s*/g;
+  
+  // Regex pour le format [1], [2], [3], etc.
+  const splitRegex = /(?:^|\n)\[(\d+)\]\s*/g;
   
   const matches = [];
   let match;
@@ -162,6 +164,18 @@ function parseTranslations(responseText, expectedCount) {
       index: match.index,
       fullMatchLength: match[0].length
     });
+  }
+  
+  if (matches.length === 0) {
+    // Fallback: essayer l'ancien format 1., 2., 3.
+    const oldRegex = /(?:^|\n)(\d+)[\.\)]\s*/g;
+    while ((match = oldRegex.exec(responseText)) !== null) {
+      matches.push({
+        number: parseInt(match[1]),
+        index: match.index,
+        fullMatchLength: match[0].length
+      });
+    }
   }
   
   if (matches.length === 0) {

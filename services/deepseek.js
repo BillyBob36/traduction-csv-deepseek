@@ -73,8 +73,8 @@ async function translateBatch(texts, targetLanguage, apiKey) {
     throw new Error(`Langue non supportée: ${targetLanguage}`);
   }
 
-  // Formatage des textes avec numérotation pour parsing fiable
-  const userContent = texts.map((text, i) => `${i + 1}. ${text}`).join('\n');
+  // Formatage des textes avec numérotation [1], [2], [3] pour parsing fiable
+  const userContent = texts.map((text, i) => `[${i + 1}] ${text}`).join('\n');
 
   const payload = {
     model: 'deepseek-chat',
@@ -158,15 +158,14 @@ async function translateBatch(texts, targetLanguage, apiKey) {
 
 /**
  * Parse la réponse DeepSeek pour extraire les traductions
- * Gère le format numéroté (1. xxx, 2. yyy, etc.) avec contenu multiligne
+ * Gère le format numéroté [1], [2], [3] avec contenu multiligne
  * Chaque traduction peut contenir du HTML avec des retours à la ligne
  */
 function parseTranslations(responseText, expectedCount) {
   const translations = [];
   
-  // Regex pour trouver les débuts de traduction numérotée (1. , 2. , etc.)
-  // On cherche un numéro en début de ligne suivi d'un point ou parenthèse
-  const splitRegex = /(?:^|\n)(\d+)[\.\)]\s*/g;
+  // Regex pour le format [1], [2], [3], etc.
+  const splitRegex = /(?:^|\n)\[(\d+)\]\s*/g;
   
   // Trouver toutes les positions des numéros
   const matches = [];
@@ -177,6 +176,18 @@ function parseTranslations(responseText, expectedCount) {
       index: match.index,
       fullMatchLength: match[0].length
     });
+  }
+  
+  if (matches.length === 0) {
+    // Fallback: essayer l'ancien format 1., 2., 3.
+    const oldRegex = /(?:^|\n)(\d+)[\.\)]\s*/g;
+    while ((match = oldRegex.exec(responseText)) !== null) {
+      matches.push({
+        number: parseInt(match[1]),
+        index: match.index,
+        fullMatchLength: match[0].length
+      });
+    }
   }
   
   // Si aucun numéro trouvé, retourner le texte brut comme une seule traduction
