@@ -10,14 +10,14 @@ const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
 
 // Configuration des rate limits par tier pour gpt-4o-mini
-// batchSize réduit pour éviter troncation des réponses longues
-// rampUp: démarrage progressif pour éviter les 502
+// batchSize=1 : une cellule par appel API pour éviter les problèmes de mapping
+// maxParallel=200 : beaucoup de requêtes parallèles car chaque requête est petite
 const TIER_LIMITS = {
-  1: { rpm: 500, tpm: 200000, maxParallel: 200, batchSize: 1, rampUp: { initial: 50, delay: 1000, step: 50 } },
-  2: { rpm: 500, tpm: 2000000, maxParallel: 200, batchSize: 1, rampUp: { initial: 50, delay: 1000, step: 50 } },
+  1: { rpm: 500, tpm: 200000, maxParallel: 50, batchSize: 1, rampUp: { initial: 20, delay: 2000, step: 15 } },
+  2: { rpm: 500, tpm: 2000000, maxParallel: 100, batchSize: 1, rampUp: { initial: 30, delay: 1500, step: 30 } },
   3: { rpm: 5000, tpm: 4000000, maxParallel: 200, batchSize: 1, rampUp: { initial: 50, delay: 1000, step: 50 } },
-  4: { rpm: 10000, tpm: 10000000, maxParallel: 200, batchSize: 1, rampUp: { initial: 50, delay: 1000, step: 50 } },
-  5: { rpm: 30000, tpm: 150000000, maxParallel: 200, batchSize: 1, rampUp: { initial: 50, delay: 1000, step: 50 } }
+  4: { rpm: 10000, tpm: 10000000, maxParallel: 300, batchSize: 1, rampUp: { initial: 80, delay: 800, step: 80 } },
+  5: { rpm: 30000, tpm: 150000000, maxParallel: 500, batchSize: 1, rampUp: { initial: 100, delay: 500, step: 100 } }
 };
 
 // Stats pour le coût
@@ -58,7 +58,8 @@ function sleep(ms) {
 }
 
 /**
- * Envoie un batch de textes à traduire à OpenAI
+ * Envoie un texte unique à traduire à OpenAI (batchSize=1)
+ * Retourne directement la traduction sans parsing complexe
  */
 async function translateBatchOpenAI(texts, targetLanguage, apiKey, tier = 3) {
   const systemPrompt = SYSTEM_PROMPTS[targetLanguage];
@@ -67,8 +68,8 @@ async function translateBatchOpenAI(texts, targetLanguage, apiKey, tier = 3) {
     throw new Error(`Langue non supportée: ${targetLanguage}`);
   }
 
-  const userContent = texts.map((text, i) => `[${i + 1}] ${text}`).join('\n');
-  const tierLimits = getTierLimits(tier);
+  // Avec batchSize=1, on envoie directement le texte sans numérotation
+  const userContent = texts.length === 1 ? texts[0] : texts.map((text, i) => `[${i + 1}] ${text}`).join('\n');
 
   const payload = {
     model: 'gpt-4o-mini',
@@ -77,7 +78,7 @@ async function translateBatchOpenAI(texts, targetLanguage, apiKey, tier = 3) {
       { role: 'user', content: userContent }
     ],
     temperature: 0.1,
-    max_tokens: 16384
+    max_tokens: 8192
   };
 
   let lastError = null;
@@ -126,7 +127,11 @@ async function translateBatchOpenAI(texts, targetLanguage, apiKey, tier = 3) {
       }
 
       const responseText = data.choices[0]?.message?.content || '';
-      const translations = parseTranslations(responseText, texts.length);
+      
+      // Avec batchSize=1, la réponse est directement la traduction
+      const translations = texts.length === 1 
+        ? [responseText.trim()] 
+        : parseTranslations(responseText, texts.length);
 
       return { translations, usage: data.usage };
 

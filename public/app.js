@@ -63,7 +63,8 @@ const elements = {
   llmProviderRadios: document.getElementsByName('llmProvider'),
   openaiConfig: document.getElementById('openaiConfig'),
   openaiApiKey: document.getElementById('openaiApiKey'),
-  openaiTier: document.getElementById('openaiTier')
+  openaiTier: document.getElementById('openaiTier'),
+  uploadSection: document.getElementById('uploadSection')
 };
 
 /**
@@ -315,8 +316,9 @@ async function startTranslation(isTest = false) {
   state.translatedFiles = [];
 
   // Masquer toutes les sections sauf progression
-  elements.filesList.parentElement.hidden = true; // Cache toute la section upload
-  elements.languageSection.parentElement.hidden = true; // Cache toute la section langue
+  elements.uploadSection.hidden = true;
+  elements.filesList.hidden = true;
+  elements.languageSection.hidden = true;
   elements.actionSection.hidden = true;
   elements.estimateSection.hidden = true;
   elements.testSection.hidden = true;
@@ -586,12 +588,13 @@ function resetApp() {
   elements.resultsSection.hidden = true;
   elements.errorSection.hidden = true;
   elements.progressSection.hidden = true;
-  elements.filesList.parentElement.hidden = false; // Réaffiche toute la section upload
-  elements.languageSection.parentElement.hidden = false; // Réaffiche toute la section langue
+  elements.filesList.hidden = true;
+  elements.languageSection.hidden = true;
   elements.llmSection.hidden = true;
   elements.estimateSection.hidden = true;
   elements.testSection.hidden = true;
   elements.actionSection.hidden = true;
+  elements.uploadSection.hidden = false;
 
   // Reset test mode
   state.testMode = false;

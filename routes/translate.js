@@ -241,7 +241,7 @@ router.post('/', upload.array('files'), async (req, res) => {
     console.log(`[OpenAI] Tier ${openaiTier}: ${tierLimits.rpm} RPM, ${maxParallel} max parallèles, batch=${batchSize}, rampUp=${tierLimits.rampUp.initial}→${maxParallel}`);
   } else {
     maxParallel = 300; // DeepSeek n'a pas de rate limit
-    batchSize = 1; // batchSize=1 pour éviter les problèmes de répartition
+    batchSize = 25;
   }
 
   console.log(`[Traduction] Début - ${files.length} fichier(s), langue: ${targetLanguage}, provider: ${llmProvider}${testMode ? ` (MODE TEST: ${testLines} lignes max)` : ' (COMPLET)'}`);
@@ -367,7 +367,7 @@ router.post('/', upload.array('files'), async (req, res) => {
 
             fileProcessedBatches++;
             
-            // Envoyer update de progression toutes les 200 réponses
+            // Envoyer update de progression toutes les 200 réponses (ou à la fin)
             if (globalProcessedUnique % 200 === 0 || globalProcessedUnique === globalTotalUnique) {
               const stats = llmProvider === 'openai' ? getOpenAIStats() : getCacheStats();
               const percentComplete = Math.round((globalProcessedUnique / globalTotalUnique) * 100);
