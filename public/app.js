@@ -153,19 +153,27 @@ function setupEventListeners() {
     startTranslation(state.testMode);
   });
 
-  // Test lines count - met à jour le hint
+  // Test lines count - met à jour le hint et recalcule l'estimation
   elements.testLinesCount.addEventListener('input', (e) => {
     const value = parseInt(e.target.value) || 0;
     state.testLines = value;
     state.testMode = value > 0;
     elements.testHint.textContent = value > 0 ? `Test: ${value} lignes` : 'Traduction complète';
+    // Recalculer l'estimation avec le nouveau nombre de lignes
+    if (state.files.length > 0 && state.selectedLanguage) {
+      getEstimate();
+    }
   });
 
-  // LLM Provider selection
+  // LLM Provider selection - recalcule l'estimation
   elements.llmProviderRadios.forEach(radio => {
     radio.addEventListener('change', (e) => {
       state.llmProvider = e.target.value;
       elements.openaiConfig.hidden = state.llmProvider !== 'openai';
+      // Recalculer l'estimation avec le nouveau provider
+      if (state.files.length > 0 && state.selectedLanguage) {
+        getEstimate();
+      }
     });
   });
 
@@ -282,12 +290,15 @@ function updateUI() {
 
 /**
  * Obtient l'estimation du coût et du temps
+ * Prend en compte le provider et le nombre de lignes test
  */
 async function getEstimate() {
   if (state.files.length === 0) return;
 
   const formData = new FormData();
   state.files.forEach(file => formData.append('files', file));
+  formData.append('llmProvider', state.llmProvider);
+  formData.append('testLines', state.testLines.toString());
 
   try {
     const response = await fetch('/api/translate/estimate', {

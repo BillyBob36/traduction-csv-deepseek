@@ -1,16 +1,78 @@
 /**
  * Service d'appel à l'API DeepSeek
+ * - Cellules HTML : 1 par appel (prompt simple SYSTEM_PROMPTS)
+ * - Cellules texte simple : batch max 2000 caractères (prompt BATCH_PROMPTS avec [1], [2])
  * Gère la parallélisation, le retry avec backoff exponentiel, et le monitoring du cache
  */
 
-const { BATCH_PROMPTS } = require('../config/prompts');
-// DeepSeek utilise toujours BATCH_PROMPTS car il gère bien les batches
-const SYSTEM_PROMPTS = BATCH_PROMPTS;
+const { SYSTEM_PROMPTS, BATCH_PROMPTS } = require('../config/prompts');
 
 // Configuration DeepSeek
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
+const MAX_BATCH_CHARS = 2000; // Max caractères par batch pour texte simple
+
+/**
+ * Détecte si un texte contient du HTML
+ */
+function containsHTML(text) {
+  return text.includes('<') && text.includes('>');
+}
+
+/**
+ * Sépare les textes en HTML (1 par appel) et texte simple (batches de max 2000 chars)
+ * @returns {Array} - Liste de batches, chaque batch = {texts: [], isHTML: boolean, items: []}
+ */
+function createSmartBatchesDeepSeek(uniqueTexts) {
+  const batches = [];
+  const htmlTexts = [];
+  const simpleTexts = [];
+  
+  // Séparer HTML et texte simple
+  for (let i = 0; i < uniqueTexts.length; i++) {
+    const item = { index: i, text: uniqueTexts[i].text, originalIndices: uniqueTexts[i].indices };
+    if (containsHTML(item.text)) {
+      htmlTexts.push(item);
+    } else {
+      simpleTexts.push(item);
+    }
+  }
+  
+  // HTML : 1 par batch
+  for (const item of htmlTexts) {
+    batches.push({
+      texts: [item.text],
+      isHTML: true,
+      items: [item]
+    });
+  }
+  
+  // Texte simple : batches de max 2000 caractères
+  let currentBatch = { texts: [], isHTML: false, items: [], totalChars: 0 };
+  for (const item of simpleTexts) {
+    const textLength = item.text.length;
+    
+    if (currentBatch.totalChars + textLength > MAX_BATCH_CHARS && currentBatch.texts.length > 0) {
+      // Sauvegarder le batch actuel et en créer un nouveau
+      batches.push(currentBatch);
+      currentBatch = { texts: [], isHTML: false, items: [], totalChars: 0 };
+    }
+    
+    currentBatch.texts.push(item.text);
+    currentBatch.items.push(item);
+    currentBatch.totalChars += textLength;
+  }
+  
+  // Ajouter le dernier batch s'il n'est pas vide
+  if (currentBatch.texts.length > 0) {
+    batches.push(currentBatch);
+  }
+  
+  console.log(`[SmartBatch DeepSeek] ${htmlTexts.length} cellules HTML (1/appel), ${simpleTexts.length} textes simples → ${batches.length - htmlTexts.length} batches`);
+  
+  return batches;
+}
 
 // Stats globales de cache pour monitoring
 let cacheStats = {
@@ -66,17 +128,23 @@ function sleep(ms) {
  * @param {string[]} texts - Tableau de textes à traduire
  * @param {string} targetLanguage - Code langue de destination (fr, en, de, etc.)
  * @param {string} apiKey - Clé API DeepSeek
+ * @param {boolean} isHTML - Si true, utilise le prompt simple (1 cellule HTML)
  * @returns {Promise<{translations: string[], usage: object}>}
  */
-async function translateBatch(texts, targetLanguage, apiKey) {
-  const systemPrompt = SYSTEM_PROMPTS[targetLanguage];
+async function translateBatch(texts, targetLanguage, apiKey, isHTML = false) {
+  // Choisir le bon prompt selon le type
+  const systemPrompt = isHTML || texts.length === 1 
+    ? SYSTEM_PROMPTS[targetLanguage] 
+    : BATCH_PROMPTS[targetLanguage];
   
   if (!systemPrompt) {
     throw new Error(`Langue non supportée: ${targetLanguage}`);
   }
 
-  // Formatage des textes avec numérotation [1], [2], [3] pour parsing fiable
-  const userContent = texts.map((text, i) => `[${i + 1}] ${text}`).join('\n');
+  // HTML ou 1 seul texte : envoi direct. Sinon : format [1], [2], [3]
+  const userContent = (isHTML || texts.length === 1) 
+    ? texts[0] 
+    : texts.map((text, i) => `[${i + 1}] ${text}`).join('\n');
 
   const payload = {
     model: 'deepseek-chat',
@@ -133,7 +201,11 @@ async function translateBatch(texts, targetLanguage, apiKey) {
 
       // Extraction des traductions depuis la réponse
       const responseText = data.choices[0]?.message?.content || '';
-      const translations = parseTranslations(responseText, texts.length);
+      
+      // Si HTML ou 1 seul texte, retourner directement sans parsing
+      const translations = (isHTML || texts.length === 1)
+        ? [responseText.trim()]
+        : parseTranslations(responseText, texts.length);
 
       return {
         translations,
@@ -268,5 +340,6 @@ module.exports = {
   translateBatch,
   resetCacheStats,
   getCacheStats,
-  ParallelController
+  ParallelController,
+  createSmartBatchesDeepSeek
 };

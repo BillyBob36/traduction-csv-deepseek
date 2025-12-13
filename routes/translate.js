@@ -12,7 +12,7 @@ const path = require('path');
 const router = express.Router();
 
 const { parseCSV, insertTranslations, normalizeAndDeduplicateHandles, generateCSV, createBatches } = require('../services/csv');
-const { translateBatch: translateBatchDeepSeek, resetCacheStats, getCacheStats, ParallelController } = require('../services/deepseek');
+const { translateBatch: translateBatchDeepSeek, resetCacheStats, getCacheStats, ParallelController, createSmartBatchesDeepSeek } = require('../services/deepseek');
 const { translateBatchOpenAI, resetOpenAIStats, getOpenAIStats, getTierLimits, TIER_LIMITS, RampUpController, createSmartBatches } = require('../services/openai');
 const LANGUAGES = require('../config/languages');
 
@@ -344,21 +344,13 @@ router.post('/', upload.array('files'), async (req, res) => {
 
       console.log(`[Fichier ${fileIndex + 1}/${files.length}] ${fileName} - ${dedup.totalUnique} textes uniques à traduire`);
 
-      // Créer les batches selon le provider
+      // Créer les batches selon le provider (même système pour les deux)
+      // Smart batches : HTML 1/appel, texte simple max 2000 chars
       let batches;
       if (llmProvider === 'openai') {
-        // OpenAI : smart batches (HTML 1/appel, texte simple max 2000 chars)
         batches = createSmartBatches(uniqueTexts);
       } else {
-        // DeepSeek : batches classiques de 25
-        batches = createBatches(
-          uniqueTexts.map((u, i) => ({ index: i, text: u.text, indices: u.indices })), 
-          batchSize
-        ).map(batch => ({
-          texts: batch.map(item => item.text),
-          isHTML: false,
-          items: batch.map(item => ({ index: item.index, text: item.text, originalIndices: uniqueTexts[item.index].indices }))
-        }));
+        batches = createSmartBatchesDeepSeek(uniqueTexts);
       }
 
       sendSSE(sessionId, {
@@ -377,13 +369,13 @@ router.post('/', upload.array('files'), async (req, res) => {
       const batchPromises = batches.map((batch, batchIndex) => 
         parallelController.execute(async () => {
           try {
-            // Appeler le bon provider
+            // Appeler le bon provider (même système: isHTML pour choisir le prompt)
             let translations;
             if (llmProvider === 'openai') {
               const result = await translateBatchOpenAI(batch.texts, targetLanguage, apiKey, openaiTier, batch.isHTML);
               translations = result.translations;
             } else {
-              const result = await translateBatchDeepSeek(batch.texts, targetLanguage, apiKey);
+              const result = await translateBatchDeepSeek(batch.texts, targetLanguage, apiKey, batch.isHTML);
               translations = result.translations;
             }
             
@@ -632,6 +624,7 @@ router.get('/openai-tiers', (req, res) => {
 
 /**
  * Route pour estimer le coût avant traduction
+ * Prend en compte le provider (openai/deepseek) et le mode test (testLines)
  */
 router.post('/estimate', upload.array('files'), async (req, res) => {
   try {
@@ -640,40 +633,61 @@ router.post('/estimate', upload.array('files'), async (req, res) => {
       return res.status(400).json({ error: 'Aucun fichier uploadé' });
     }
 
+    // Paramètres optionnels
+    const llmProvider = req.body.llmProvider || 'deepseek';
+    const testLines = parseInt(req.body.testLines) || 0;
+
     let totalLines = 0;
     let totalChars = 0;
 
     for (const file of files) {
       const { sourceTexts } = await parseCSV(file.buffer);
-      totalLines += sourceTexts.length;
-      totalChars += sourceTexts.reduce((sum, item) => sum + item.text.length, 0);
+      
+      // Si mode test, limiter les lignes
+      const linesToCount = testLines > 0 ? sourceTexts.slice(0, testLines) : sourceTexts;
+      totalLines += linesToCount.length;
+      totalChars += linesToCount.reduce((sum, item) => sum + item.text.length, 0);
     }
 
-    // Estimation tokens (1 token ≈ 4 caractères pour du texte occidental)
-    const estimatedInputTokens = Math.ceil(totalChars / 4);
-    const estimatedOutputTokens = estimatedInputTokens; // Sortie similaire à l'entrée
-
-    // Coût estimé (en supposant 70% cache hit après les premiers batches)
-    const cacheHitTokens = estimatedInputTokens * 0.7;
-    const cacheMissTokens = estimatedInputTokens * 0.3;
+    // Estimation tokens (1 token ≈ 3.5 caractères - plus réaliste)
+    // + tokens du prompt système (~200 tokens par requête)
+    const estimatedInputTokens = Math.ceil(totalChars / 3.5);
+    const estimatedOutputTokens = Math.ceil(estimatedInputTokens * 1.1); // Output légèrement plus long
     
-    const costCacheHit = (cacheHitTokens / 1_000_000) * 0.028;
-    const costCacheMiss = (cacheMissTokens / 1_000_000) * 0.28;
-    const costOutput = (estimatedOutputTokens / 1_000_000) * 0.42;
-    const totalCost = costCacheHit + costCacheMiss + costOutput;
+    // Estimation du nombre de requêtes (smart batching: ~15 textes/batch en moyenne)
+    const estimatedRequests = Math.ceil(totalLines / 15);
+    const promptTokensOverhead = estimatedRequests * 200; // ~200 tokens de prompt par requête
+    const totalInputTokens = estimatedInputTokens + promptTokensOverhead;
 
-    // Estimation temps (environ 50 lignes/seconde avec parallélisation)
-    const estimatedSeconds = Math.ceil(totalLines / 50);
-    const estimatedMinutes = Math.ceil(estimatedSeconds / 60);
+    let totalCost;
+    if (llmProvider === 'openai') {
+      // Prix OpenAI gpt-4o-mini : $0.15/M input, $0.60/M output
+      const inputCost = (totalInputTokens / 1_000_000) * 0.15;
+      const outputCost = (estimatedOutputTokens / 1_000_000) * 0.60;
+      totalCost = inputCost + outputCost;
+    } else {
+      // Prix DeepSeek (avec cache ~50% hit après warmup)
+      const cacheHitTokens = totalInputTokens * 0.5;
+      const cacheMissTokens = totalInputTokens * 0.5;
+      const costCacheHit = (cacheHitTokens / 1_000_000) * 0.028;
+      const costCacheMiss = (cacheMissTokens / 1_000_000) * 0.28;
+      const costOutput = (estimatedOutputTokens / 1_000_000) * 0.42;
+      totalCost = costCacheHit + costCacheMiss + costOutput;
+    }
+
+    // Estimation temps (environ 150 lignes/seconde avec parallélisation optimisée)
+    const estimatedSeconds = Math.ceil(totalLines / 150);
+    const estimatedMinutes = Math.max(1, Math.ceil(estimatedSeconds / 60));
 
     res.json({
       totalFiles: files.length,
       totalLines,
       totalChars,
-      estimatedInputTokens,
+      estimatedInputTokens: totalInputTokens,
       estimatedOutputTokens,
-      estimatedCost: parseFloat(totalCost.toFixed(4)),
-      estimatedTimeMinutes: estimatedMinutes
+      estimatedCost: parseFloat(totalCost.toFixed(2)),
+      estimatedTimeMinutes: estimatedMinutes,
+      llmProvider
     });
 
   } catch (error) {
