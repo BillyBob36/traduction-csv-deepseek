@@ -13,11 +13,11 @@ const BASE_DELAY_MS = 1000;
 // batchSize réduit pour éviter troncation des réponses longues
 // rampUp: démarrage progressif pour éviter les 502
 const TIER_LIMITS = {
-  1: { rpm: 500, tpm: 200000, maxParallel: 30, batchSize: 8, rampUp: { initial: 10, delay: 2000, step: 10 } },
-  2: { rpm: 500, tpm: 2000000, maxParallel: 50, batchSize: 10, rampUp: { initial: 15, delay: 1500, step: 15 } },
-  3: { rpm: 5000, tpm: 4000000, maxParallel: 100, batchSize: 10, rampUp: { initial: 30, delay: 1000, step: 30 } },
-  4: { rpm: 10000, tpm: 10000000, maxParallel: 150, batchSize: 12, rampUp: { initial: 40, delay: 800, step: 40 } },
-  5: { rpm: 30000, tpm: 150000000, maxParallel: 250, batchSize: 15, rampUp: { initial: 60, delay: 500, step: 60 } }
+  1: { rpm: 500, tpm: 200000, maxParallel: 200, batchSize: 1, rampUp: { initial: 50, delay: 1000, step: 50 } },
+  2: { rpm: 500, tpm: 2000000, maxParallel: 200, batchSize: 1, rampUp: { initial: 50, delay: 1000, step: 50 } },
+  3: { rpm: 5000, tpm: 4000000, maxParallel: 200, batchSize: 1, rampUp: { initial: 50, delay: 1000, step: 50 } },
+  4: { rpm: 10000, tpm: 10000000, maxParallel: 200, batchSize: 1, rampUp: { initial: 50, delay: 1000, step: 50 } },
+  5: { rpm: 30000, tpm: 150000000, maxParallel: 200, batchSize: 1, rampUp: { initial: 50, delay: 1000, step: 50 } }
 };
 
 // Stats pour le coût

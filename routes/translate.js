@@ -241,7 +241,7 @@ router.post('/', upload.array('files'), async (req, res) => {
     console.log(`[OpenAI] Tier ${openaiTier}: ${tierLimits.rpm} RPM, ${maxParallel} max parallèles, batch=${batchSize}, rampUp=${tierLimits.rampUp.initial}→${maxParallel}`);
   } else {
     maxParallel = 300; // DeepSeek n'a pas de rate limit
-    batchSize = 25;
+    batchSize = 1; // batchSize=1 pour éviter les problèmes de répartition
   }
 
   console.log(`[Traduction] Début - ${files.length} fichier(s), langue: ${targetLanguage}, provider: ${llmProvider}${testMode ? ` (MODE TEST: ${testLines} lignes max)` : ' (COMPLET)'}`);
@@ -367,25 +367,27 @@ router.post('/', upload.array('files'), async (req, res) => {
 
             fileProcessedBatches++;
             
-            // Envoyer update de progression après chaque batch (forcé, pas throttled)
-            const stats = llmProvider === 'openai' ? getOpenAIStats() : getCacheStats();
-            const percentComplete = Math.round((globalProcessedUnique / globalTotalUnique) * 100);
-            sendSSE(sessionId, {
-              type: 'progress',
-              fileIndex,
-              fileName,
-              fileProcessedTexts,
-              fileTotalTexts: dedup.totalUnique,
-              globalProcessedUnique,
-              globalTotalUnique,
-              globalProcessedLines: Math.round((globalProcessedUnique / globalTotalUnique) * globalTotalOriginal),
-              globalTotalLines: globalTotalOriginal,
-              percentComplete,
-              batchesCompleted: fileProcessedBatches,
-              totalBatches: batches.length,
-              llmProvider,
-              cacheStats: stats
-            });
+            // Envoyer update de progression toutes les 200 réponses
+            if (globalProcessedUnique % 200 === 0 || globalProcessedUnique === globalTotalUnique) {
+              const stats = llmProvider === 'openai' ? getOpenAIStats() : getCacheStats();
+              const percentComplete = Math.round((globalProcessedUnique / globalTotalUnique) * 100);
+              sendSSE(sessionId, {
+                type: 'progress',
+                fileIndex,
+                fileName,
+                fileProcessedTexts,
+                fileTotalTexts: dedup.totalUnique,
+                globalProcessedUnique,
+                globalTotalUnique,
+                globalProcessedLines: Math.round((globalProcessedUnique / globalTotalUnique) * globalTotalOriginal),
+                globalTotalLines: globalTotalOriginal,
+                percentComplete,
+                batchesCompleted: fileProcessedBatches,
+                totalBatches: batches.length,
+                llmProvider,
+                cacheStats: stats
+              });
+            }
 
           } catch (error) {
             console.error(`[Batch ${batchIndex}] Erreur:`, error.message);

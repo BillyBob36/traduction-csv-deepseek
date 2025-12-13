@@ -315,15 +315,14 @@ async function startTranslation(isTest = false) {
   state.translatedFiles = [];
 
   // Masquer toutes les sections sauf progression
-  elements.filesList.hidden = true;
-  elements.languageSection.hidden = true;
+  elements.filesList.parentElement.hidden = true; // Cache toute la section upload
+  elements.languageSection.parentElement.hidden = true; // Cache toute la section langue
   elements.actionSection.hidden = true;
   elements.estimateSection.hidden = true;
   elements.testSection.hidden = true;
   elements.llmSection.hidden = true;
   elements.errorSection.hidden = true;
   elements.resultsSection.hidden = true;
-  elements.uploadZone.parentElement.hidden = true;
   elements.progressSection.hidden = false;
 
   // Réinitialiser la progression
@@ -587,13 +586,12 @@ function resetApp() {
   elements.resultsSection.hidden = true;
   elements.errorSection.hidden = true;
   elements.progressSection.hidden = true;
-  elements.filesList.hidden = true;
-  elements.languageSection.hidden = true;
+  elements.filesList.parentElement.hidden = false; // Réaffiche toute la section upload
+  elements.languageSection.parentElement.hidden = false; // Réaffiche toute la section langue
   elements.llmSection.hidden = true;
   elements.estimateSection.hidden = true;
   elements.testSection.hidden = true;
   elements.actionSection.hidden = true;
-  elements.uploadZone.parentElement.hidden = false;
 
   // Reset test mode
   state.testMode = false;
