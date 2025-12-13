@@ -10,6 +10,66 @@ const { Readable, Transform } = require('stream');
 // Index des colonnes (0-based)
 const SOURCE_COLUMN_INDEX = 6; // Colonne G
 const TARGET_COLUMN_INDEX = 7; // Colonne H
+const FIELD_TYPE_COLUMN_INDEX = 2; // Colonne C
+
+function slugifyHandle(value) {
+  const raw = (value ?? '').toString().trim().toLowerCase();
+  if (!raw) return '';
+
+  const noAccents = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const cleaned = noAccents
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  return cleaned;
+}
+
+/**
+ * Post-traitement des handles :
+ * - cible uniquement les lignes où colonne C == "handle"
+ * - normalise la colonne H (target) en slug (sans accents, sans chars spéciaux, '-' autorisé)
+ * - garantit l'unicité en ajoutant un suffixe -001/-002/... si doublon
+ */
+function normalizeAndDeduplicateHandles(rows) {
+  const used = new Set();
+  const baseCounters = new Map();
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+
+    while (row.length <= TARGET_COLUMN_INDEX) {
+      row.push('');
+    }
+
+    const fieldType = (row[FIELD_TYPE_COLUMN_INDEX] ?? '').toString().trim().toLowerCase();
+    if (fieldType !== 'handle') continue;
+
+    const base = slugifyHandle(row[TARGET_COLUMN_INDEX]);
+    const safeBase = base || 'handle';
+
+    let candidate = safeBase;
+    if (used.has(candidate)) {
+      let counter = baseCounters.get(safeBase) ?? 0;
+      while (true) {
+        counter += 1;
+        const suffix = String(counter).padStart(3, '0');
+        const attempt = `${safeBase}-${suffix}`;
+        if (!used.has(attempt)) {
+          candidate = attempt;
+          baseCounters.set(safeBase, counter);
+          break;
+        }
+      }
+    }
+
+    used.add(candidate);
+    row[TARGET_COLUMN_INDEX] = candidate;
+  }
+
+  return rows;
+}
 
 /**
  * Parse un CSV en streaming et extrait les données nécessaires
@@ -213,8 +273,10 @@ module.exports = {
   parseCSV,
   parseCSVStreaming,
   insertTranslations,
+  normalizeAndDeduplicateHandles,
   generateCSV,
   createBatches,
   SOURCE_COLUMN_INDEX,
-  TARGET_COLUMN_INDEX
+  TARGET_COLUMN_INDEX,
+  FIELD_TYPE_COLUMN_INDEX
 };

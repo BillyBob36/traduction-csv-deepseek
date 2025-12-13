@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 
-const { parseCSV, insertTranslations, generateCSV, createBatches } = require('../services/csv');
+const { parseCSV, insertTranslations, normalizeAndDeduplicateHandles, generateCSV, createBatches } = require('../services/csv');
 const { translateBatch: translateBatchDeepSeek, resetCacheStats, getCacheStats, ParallelController } = require('../services/deepseek');
 const { translateBatchOpenAI, resetOpenAIStats, getOpenAIStats, getTierLimits, TIER_LIMITS, RampUpController, createSmartBatches } = require('../services/openai');
 const LANGUAGES = require('../config/languages');
@@ -432,6 +432,9 @@ router.post('/', upload.array('files'), async (req, res) => {
 
       // Insérer les traductions dans les rows
       insertTranslations(rows, translationsMap);
+
+      // Post-traitement : normaliser + dédoublonner les handles (colonne C == "handle")
+      normalizeAndDeduplicateHandles(rows);
 
       // Générer le CSV traduit
       const translatedCSV = await generateCSV(rows);

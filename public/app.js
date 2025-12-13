@@ -258,6 +258,17 @@ function clearFiles() {
  * Met à jour l'interface selon l'état
  */
 function updateUI() {
+  if (state.isTranslating) {
+    elements.uploadSection.hidden = true;
+    elements.filesList.hidden = true;
+    elements.languageSection.hidden = true;
+    elements.llmSection.hidden = true;
+    elements.estimateSection.hidden = true;
+    elements.testSection.hidden = true;
+    elements.actionSection.hidden = true;
+    return;
+  }
+
   const hasFiles = state.files.length > 0;
   const hasLanguage = !!state.selectedLanguage;
 
