@@ -326,17 +326,19 @@ async function startTranslation(isTest = false) {
   state.sessionId = `session_${Date.now()}`;
   state.translatedFiles = [];
 
-  // Masquer toutes les sections sauf progression
+  // Masquer toutes les sections sauf progression et estimation
   elements.uploadSection.hidden = true;
   elements.filesList.hidden = true;
   elements.languageSection.hidden = true;
   elements.actionSection.hidden = true;
-  elements.estimateSection.hidden = true;
+  elements.estimateSection.hidden = false; // Garder visible pendant la traduction
   elements.testSection.hidden = true;
   elements.llmSection.hidden = true;
   elements.errorSection.hidden = true;
   elements.resultsSection.hidden = true;
   elements.progressSection.hidden = false;
+  
+  console.log('[UI] Sections masquées, progression affichée');
 
   // Réinitialiser la progression
   updateProgress(0, 0, 0);
@@ -407,15 +409,21 @@ function connectSSE() {
     state.eventSource.close();
   }
 
+  console.log(`[SSE Client] Connexion à /api/translate/progress/${state.sessionId}`);
   state.eventSource = new EventSource(`/api/translate/progress/${state.sessionId}`);
 
+  state.eventSource.onopen = () => {
+    console.log('[SSE Client] Connexion établie');
+  };
+
   state.eventSource.onmessage = (event) => {
+    console.log('[SSE Client] Message reçu:', event.data.substring(0, 100));
     const data = JSON.parse(event.data);
     handleSSEMessage(data);
   };
 
-  state.eventSource.onerror = () => {
-    console.warn('SSE connexion perdue, reconnexion...');
+  state.eventSource.onerror = (err) => {
+    console.error('[SSE Client] Erreur:', err);
   };
 }
 

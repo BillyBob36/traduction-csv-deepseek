@@ -72,20 +72,25 @@ function sendSSEThrottled(sessionId, data) {
  */
 router.get('/progress/:sessionId', (req, res) => {
   const { sessionId } = req.params;
+  
+  console.log(`[SSE] Client connecté: ${sessionId}`);
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.flushHeaders(); // Force l'envoi immédiat des headers
 
   // Enregistrer le client SSE
   sseClients.set(sessionId, res);
+  console.log(`[SSE] Clients actifs: ${sseClients.size}`);
 
   // Envoyer un ping initial
   res.write(`data: ${JSON.stringify({ type: 'connected', sessionId })}\n\n`);
 
   // Nettoyage à la déconnexion
   req.on('close', () => {
+    console.log(`[SSE] Client déconnecté: ${sessionId}`);
     sseClients.delete(sessionId);
   });
 });
@@ -96,7 +101,17 @@ router.get('/progress/:sessionId', (req, res) => {
 function sendSSE(sessionId, data) {
   const client = sseClients.get(sessionId);
   if (client) {
-    client.write(`data: ${JSON.stringify(data)}\n\n`);
+    try {
+      client.write(`data: ${JSON.stringify(data)}\n\n`);
+      // Log uniquement pour les événements importants (pas chaque progress)
+      if (data.type !== 'progress') {
+        console.log(`[SSE] Envoyé ${data.type} à ${sessionId}`);
+      }
+    } catch (err) {
+      console.error(`[SSE] Erreur envoi à ${sessionId}:`, err.message);
+    }
+  } else {
+    console.warn(`[SSE] Client non trouvé: ${sessionId} (clients actifs: ${sseClients.size})`);
   }
 }
 
@@ -376,6 +391,11 @@ router.post('/', upload.array('files'), async (req, res) => {
             }
 
             fileProcessedBatches++;
+            
+            // Log de progression toutes les 100 batches
+            if (fileProcessedBatches % 100 === 0 || fileProcessedBatches === 1) {
+              console.log(`[Progression] ${fileProcessedBatches}/${batches.length} batches, ${globalProcessedUnique}/${globalTotalUnique} uniques (${Math.round((globalProcessedUnique / globalTotalUnique) * 100)}%)`);
+            }
             
             // Envoyer update de progression à chaque batch complété
             const stats = llmProvider === 'openai' ? getOpenAIStats() : getCacheStats();

@@ -27,6 +27,11 @@
   box-sizing: border-box;
 }
 
+/* Force l'attribut hidden à fonctionner même avec display: flex/block */
+[hidden] {
+  display: none !important;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--bg-color);
