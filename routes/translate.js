@@ -76,9 +76,12 @@ router.get('/progress/:sessionId', (req, res) => {
   console.log(`[SSE] Client connecté: ${sessionId}`);
 
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  // Headers pour désactiver le buffering des proxies (Nginx/Render)
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Content-Encoding', 'none');
   res.flushHeaders(); // Force l'envoi immédiat des headers
 
   // Enregistrer le client SSE
@@ -97,12 +100,17 @@ router.get('/progress/:sessionId', (req, res) => {
 
 /**
  * Envoie un événement SSE à un client
+ * Utilise flush() pour forcer l'envoi immédiat (contourne le buffering proxy)
  */
 function sendSSE(sessionId, data) {
   const client = sseClients.get(sessionId);
   if (client) {
     try {
       client.write(`data: ${JSON.stringify(data)}\n\n`);
+      // Forcer l'envoi immédiat pour contourner le buffering du proxy Render
+      if (typeof client.flush === 'function') {
+        client.flush();
+      }
       // Log uniquement pour les événements importants (pas chaque progress)
       if (data.type !== 'progress') {
         console.log(`[SSE] Envoyé ${data.type} à ${sessionId}`);
