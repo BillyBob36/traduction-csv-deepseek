@@ -183,9 +183,13 @@ function setupEventListeners() {
     state.openaiApiKey = e.target.value;
   });
 
-  // OpenAI Tier
+  // OpenAI Tier - recalcule l'estimation
   elements.openaiTier.addEventListener('change', (e) => {
     state.openaiTier = parseInt(e.target.value);
+    // Recalculer l'estimation avec le nouveau tier
+    if (state.files.length > 0 && state.selectedLanguage && state.llmProvider === 'openai') {
+      getEstimate();
+    }
   });
 
   // Download buttons
@@ -300,6 +304,7 @@ async function getEstimate() {
   state.files.forEach(file => formData.append('files', file));
   formData.append('llmProvider', state.llmProvider);
   formData.append('testLines', state.testLines.toString());
+  formData.append('openaiTier', state.openaiTier.toString());
 
   try {
     const response = await fetch('/api/translate/estimate', {

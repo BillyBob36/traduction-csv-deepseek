@@ -748,8 +748,21 @@ router.post('/estimate', upload.array('files'), async (req, res) => {
       totalCost = costCacheHit + costCacheMiss + costOutput;
     }
 
-    // Estimation temps (environ 150 lignes/seconde avec parallélisation optimisée)
-    const estimatedSeconds = Math.ceil(totalLines / 150);
+    // Estimation temps selon provider et tier
+    // DeepSeek: ~150 lignes/sec, OpenAI: dépend du tier
+    const openaiTier = parseInt(req.body.openaiTier) || 3;
+    let linesPerSecond;
+    if (llmProvider === 'openai') {
+      // Vitesse basée sur le RPM du tier (avec marge de sécurité)
+      // Tier 1-2: ~5 req/sec max, Tier 3: ~50 req/sec, Tier 4: ~100 req/sec, Tier 5: ~300 req/sec
+      // Avec ~15 lignes/batch en moyenne
+      const tierSpeeds = { 1: 30, 2: 40, 3: 150, 4: 250, 5: 400 };
+      linesPerSecond = tierSpeeds[openaiTier] || 150;
+    } else {
+      linesPerSecond = 150; // DeepSeek avec haute parallélisation
+    }
+    
+    const estimatedSeconds = Math.ceil(totalLines / linesPerSecond);
     const estimatedMinutes = Math.max(1, Math.ceil(estimatedSeconds / 60));
 
     res.json({
@@ -760,7 +773,8 @@ router.post('/estimate', upload.array('files'), async (req, res) => {
       estimatedOutputTokens,
       estimatedCost: parseFloat(totalCost.toFixed(2)),
       estimatedTimeMinutes: estimatedMinutes,
-      llmProvider
+      llmProvider,
+      openaiTier: llmProvider === 'openai' ? openaiTier : null
     });
 
   } catch (error) {

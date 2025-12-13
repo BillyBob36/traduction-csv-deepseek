@@ -12,12 +12,14 @@ const BASE_DELAY_MS = 1000;
 const MAX_BATCH_CHARS = 2000; // Max caractères par batch pour texte simple
 
 // Configuration des rate limits par tier pour gpt-4o-mini
+// maxParallel basé sur RPM : on vise ~80% du RPM max pour avoir de la marge
+// Avec latence moyenne ~500ms par requête, maxParallel = RPM/60 * 0.5 * 0.8
 const TIER_LIMITS = {
-  1: { rpm: 500, tpm: 200000, maxParallel: 50, rampUp: { initial: 20, delay: 2000, step: 15 } },
-  2: { rpm: 500, tpm: 2000000, maxParallel: 100, rampUp: { initial: 30, delay: 1500, step: 30 } },
-  3: { rpm: 5000, tpm: 4000000, maxParallel: 200, rampUp: { initial: 50, delay: 1000, step: 50 } },
-  4: { rpm: 10000, tpm: 10000000, maxParallel: 300, rampUp: { initial: 80, delay: 800, step: 80 } },
-  5: { rpm: 30000, tpm: 150000000, maxParallel: 500, rampUp: { initial: 100, delay: 500, step: 100 } }
+  1: { rpm: 500, tpm: 200000, maxParallel: 8, rampUp: { initial: 3, delay: 5000, step: 2 } },
+  2: { rpm: 500, tpm: 2000000, maxParallel: 10, rampUp: { initial: 4, delay: 4000, step: 3 } },
+  3: { rpm: 5000, tpm: 4000000, maxParallel: 80, rampUp: { initial: 20, delay: 2000, step: 20 } },
+  4: { rpm: 10000, tpm: 10000000, maxParallel: 150, rampUp: { initial: 40, delay: 1500, step: 40 } },
+  5: { rpm: 30000, tpm: 150000000, maxParallel: 400, rampUp: { initial: 80, delay: 1000, step: 80 } }
 };
 
 /**
