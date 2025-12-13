@@ -343,8 +343,14 @@ async function startTranslation(isTest = false) {
   // Réinitialiser la progression
   updateProgress(0, 0, 0);
 
-  // Connecter au SSE pour la progression
-  connectSSE();
+  // Connecter au SSE pour la progression ET ATTENDRE la connexion
+  try {
+    await connectSSE();
+    console.log('[SSE Client] Connexion SSE établie, envoi de la requête de traduction...');
+  } catch (sseError) {
+    console.error('[SSE Client] Impossible de se connecter au SSE:', sseError);
+    // Continuer quand même, la traduction fonctionnera mais sans progression en temps réel
+  }
 
   // Préparer le formulaire
   const formData = new FormData();
@@ -403,28 +409,43 @@ async function startTranslation(isTest = false) {
 
 /**
  * Connecte au flux SSE pour la progression
+ * Retourne une Promise qui se résout quand la connexion est établie
  */
 function connectSSE() {
-  if (state.eventSource) {
-    state.eventSource.close();
-  }
+  return new Promise((resolve, reject) => {
+    if (state.eventSource) {
+      state.eventSource.close();
+    }
 
-  console.log(`[SSE Client] Connexion à /api/translate/progress/${state.sessionId}`);
-  state.eventSource = new EventSource(`/api/translate/progress/${state.sessionId}`);
+    console.log(`[SSE Client] Connexion à /api/translate/progress/${state.sessionId}`);
+    state.eventSource = new EventSource(`/api/translate/progress/${state.sessionId}`);
 
-  state.eventSource.onopen = () => {
-    console.log('[SSE Client] Connexion établie');
-  };
+    // Timeout si pas de connexion après 10s
+    const timeout = setTimeout(() => {
+      console.error('[SSE Client] Timeout connexion');
+      reject(new Error('Timeout connexion SSE'));
+    }, 10000);
 
-  state.eventSource.onmessage = (event) => {
-    console.log('[SSE Client] Message reçu:', event.data.substring(0, 100));
-    const data = JSON.parse(event.data);
-    handleSSEMessage(data);
-  };
+    state.eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log('[SSE Client] Message reçu:', data.type);
+      
+      // Le premier message 'connected' confirme la connexion
+      if (data.type === 'connected') {
+        clearTimeout(timeout);
+        console.log('[SSE Client] Connexion confirmée par le serveur');
+        resolve();
+      }
+      
+      handleSSEMessage(data);
+    };
 
-  state.eventSource.onerror = (err) => {
-    console.error('[SSE Client] Erreur:', err);
-  };
+    state.eventSource.onerror = (err) => {
+      console.error('[SSE Client] Erreur:', err);
+      clearTimeout(timeout);
+      // Ne pas rejeter, le SSE peut se reconnecter automatiquement
+    };
+  });
 }
 
 /**
