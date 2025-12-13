@@ -10,6 +10,7 @@ const state = {
   sessionId: null,
   eventSource: null,
   translatedFiles: [],
+  translationSessionId: null, // Session pour téléchargement des résultats
   isTranslating: false,
   testMode: false,
   testLines: 10,
@@ -393,19 +394,22 @@ async function startTranslation(isTest = false) {
       throw new Error(errorData.error || 'Erreur traduction');
     }
 
-    // Récupérer le fichier traduit
-    const contentType = response.headers.get('Content-Type');
-    const contentDisposition = response.headers.get('Content-Disposition');
-    const filename = extractFilename(contentDisposition) || `traduction_${state.selectedLanguage}.csv`;
+    // Récupérer les métadonnées des fichiers traduits
+    const data = await response.json();
+    
+    if (!data.success) {
+      throw new Error(data.error || 'Erreur traduction');
+    }
 
-    const blob = await response.blob();
-
-    // Stocker pour téléchargement
-    state.translatedFiles = [{
-      name: filename,
-      blob: blob,
-      isZip: contentType.includes('zip')
-    }];
+    // Stocker les infos pour téléchargement
+    state.translationSessionId = data.sessionId;
+    state.translatedFiles = data.files.map(f => ({
+      name: f.name,
+      size: f.size,
+      index: f.index,
+      isPartOfSplit: f.isPartOfSplit,
+      totalParts: f.totalParts
+    }));
 
     // Afficher les résultats
     showResults();
@@ -564,16 +568,30 @@ function showResults() {
   elements.progressSection.hidden = true;
   elements.resultsSection.hidden = false;
 
-  // Afficher les téléchargements individuels si plusieurs fichiers
+  // Afficher les téléchargements individuels
   elements.individualDownloads.innerHTML = '';
   
-  if (state.translatedFiles.length > 0 && !state.translatedFiles[0].isZip) {
-    state.translatedFiles.forEach((file, index) => {
+  if (state.translatedFiles.length > 0) {
+    // Afficher info si fichiers découpés
+    const hasSplitFiles = state.translatedFiles.some(f => f.isPartOfSplit);
+    if (hasSplitFiles) {
+      const infoDiv = document.createElement('div');
+      infoDiv.className = 'split-info';
+      infoDiv.innerHTML = `<i class="fas fa-info-circle"></i> Fichier(s) découpé(s) car > 10 Mo`;
+      infoDiv.style.cssText = 'color: var(--warning-color); margin-bottom: 1rem; font-size: 0.9rem;';
+      elements.individualDownloads.appendChild(infoDiv);
+    }
+    
+    state.translatedFiles.forEach((file) => {
+      const sizeKB = (file.size / 1024).toFixed(1);
+      const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+      const sizeDisplay = file.size > 1024 * 1024 ? `${sizeMB} Mo` : `${sizeKB} Ko`;
+      
       const div = document.createElement('div');
       div.className = 'download-item';
       div.innerHTML = `
-        <span><i class="fas fa-file-csv"></i> ${file.name}</span>
-        <button class="btn btn-secondary" data-index="${index}">
+        <span><i class="fas fa-file-csv"></i> ${file.name} <small>(${sizeDisplay})</small></span>
+        <button class="btn btn-secondary" data-index="${file.index}">
           <i class="fas fa-download"></i> Télécharger
         </button>
       `;
@@ -583,40 +601,44 @@ function showResults() {
     elements.individualDownloads.querySelectorAll('button').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const index = parseInt(e.currentTarget.dataset.index);
-        downloadFile(state.translatedFiles[index]);
+        downloadFileByIndex(index);
       });
     });
   }
 }
 
 /**
- * Télécharge tous les fichiers
+ * Télécharge tous les fichiers en ZIP
  */
 function downloadAll() {
-  if (state.translatedFiles.length === 0) return;
+  if (state.translatedFiles.length === 0 || !state.translationSessionId) return;
 
-  // Si c'est déjà un ZIP, télécharger directement
-  if (state.translatedFiles[0].isZip) {
-    downloadFile(state.translatedFiles[0]);
-    return;
-  }
-
-  // Sinon, télécharger le premier fichier (cas d'un seul CSV)
-  downloadFile(state.translatedFiles[0]);
+  // Télécharger le ZIP via la route API
+  const url = `/api/translate/download-zip/${state.translationSessionId}`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `traductions_${state.selectedLanguage}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 /**
- * Télécharge un fichier
+ * Télécharge un fichier individuel par son index
  */
-function downloadFile(file) {
-  const url = URL.createObjectURL(file.blob);
+function downloadFileByIndex(index) {
+  if (!state.translationSessionId) return;
+  
+  const file = state.translatedFiles.find(f => f.index === index);
+  if (!file) return;
+  
+  const url = `/api/translate/download/${state.translationSessionId}/${index}`;
   const a = document.createElement('a');
   a.href = url;
   a.download = file.name;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 /**
@@ -637,6 +659,7 @@ function resetApp() {
   state.files = [];
   state.selectedLanguage = '';
   state.translatedFiles = [];
+  state.translationSessionId = null;
   state.isTranslating = false;
 
   elements.fileInput.value = '';

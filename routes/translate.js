@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 
-const { parseCSV, insertTranslations, normalizeAndDeduplicateHandles, generateCSV, createBatches } = require('../services/csv');
+const { parseCSV, insertTranslations, normalizeAndDeduplicateHandles, generateCSV, createBatches, splitCSVIfNeeded } = require('../services/csv');
 const { translateBatch: translateBatchDeepSeek, resetCacheStats, getCacheStats, ParallelController, createSmartBatchesDeepSeek } = require('../services/deepseek');
 const { translateBatchOpenAI, resetOpenAIStats, getOpenAIStats, getTierLimits, TIER_LIMITS, RampUpController, createSmartBatches } = require('../services/openai');
 const LANGUAGES = require('../config/languages');
@@ -45,6 +45,20 @@ const sseClients = new Map();
 
 // Map pour stocker les sessions de traduction en cours (pour téléchargement temp)
 const activeSessions = new Map();
+
+// Map pour stocker les résultats de traduction (pour téléchargement)
+const translationResults = new Map();
+
+// Nettoyage automatique des résultats après 1 heure
+setInterval(() => {
+  const oneHourAgo = Date.now() - 60 * 60 * 1000;
+  for (const [sessionId, data] of translationResults) {
+    if (data.createdAt < oneHourAgo) {
+      translationResults.delete(sessionId);
+      console.log(`[Cleanup] Résultats expirés supprimés: ${sessionId}`);
+    }
+  }
+}, 10 * 60 * 1000); // Vérifier toutes les 10 minutes
 
 // Throttle pour les updates SSE (évite de surcharger le navigateur)
 const sseThrottles = new Map();
@@ -459,16 +473,23 @@ router.post('/', upload.array('files'), async (req, res) => {
       // Générer le CSV traduit
       const translatedCSV = await generateCSV(rows);
 
-      // Nom du fichier avec suffixe test si applicable
-      const suffix = testMode ? `_TEST_${targetLanguage}` : `_${targetLanguage}`;
+      // Nom de base du fichier (sans extension)
+      const baseName = fileName.replace('.csv', '') + (testMode ? '_TEST' : '');
       
-      results.push({
-        originalName: fileName,
-        translatedName: fileName.replace('.csv', `${suffix}.csv`),
-        content: translatedCSV,
-        linesTranslated: dedup.totalOriginal,
-        uniqueTranslated: dedup.totalUnique
-      });
+      // Découper si > 10 Mo (utilise 9.5 Mo comme limite de sécurité)
+      const fileParts = splitCSVIfNeeded(translatedCSV, baseName, targetLanguage);
+      
+      for (const part of fileParts) {
+        results.push({
+          originalName: fileName,
+          translatedName: part.name,
+          content: part.content,
+          linesTranslated: dedup.totalOriginal,
+          uniqueTranslated: dedup.totalUnique,
+          isPartOfSplit: fileParts.length > 1,
+          totalParts: fileParts.length
+        });
+      }
 
       sendSSE(sessionId, {
         type: 'file_complete',
@@ -503,25 +524,29 @@ router.post('/', upload.array('files'), async (req, res) => {
     activeSessions.delete(sessionId);
     sseThrottles.delete(sessionId);
 
-    // Si un seul fichier, retourner directement le CSV
-    if (results.length === 1) {
-      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="${results[0].translatedName}"`);
-      return res.send(results[0].content);
-    }
+    // Stocker les résultats pour téléchargement ultérieur
+    translationResults.set(sessionId, {
+      results,
+      targetLanguage,
+      createdAt: Date.now()
+    });
 
-    // Plusieurs fichiers : retourner un ZIP
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="traductions_${targetLanguage}.zip"`);
-
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    archive.pipe(res);
-
-    for (const result of results) {
-      archive.append(result.content, { name: result.translatedName });
-    }
-
-    await archive.finalize();
+    // Retourner les métadonnées des fichiers (le frontend choisira ZIP ou individuel)
+    res.json({
+      success: true,
+      sessionId,
+      files: results.map((r, i) => ({
+        index: i,
+        name: r.translatedName,
+        size: Buffer.byteLength(r.content, 'utf8'),
+        linesTranslated: r.linesTranslated,
+        isPartOfSplit: r.isPartOfSplit || false,
+        totalParts: r.totalParts || 1
+      })),
+      totalFiles: results.length,
+      duration,
+      stats: finalStats
+    });
 
   } catch (error) {
     console.error('[Traduction] Erreur globale:', error);
@@ -606,6 +631,54 @@ router.get('/status/:sessionId', (req, res) => {
  */
 router.get('/languages', (req, res) => {
   res.json(LANGUAGES);
+});
+
+/**
+ * Route pour télécharger un fichier individuel
+ * GET /api/translate/download/:sessionId/:fileIndex
+ */
+router.get('/download/:sessionId/:fileIndex', (req, res) => {
+  const { sessionId, fileIndex } = req.params;
+  const data = translationResults.get(sessionId);
+  
+  if (!data) {
+    return res.status(404).json({ error: 'Session expirée ou non trouvée' });
+  }
+  
+  const index = parseInt(fileIndex);
+  if (index < 0 || index >= data.results.length) {
+    return res.status(404).json({ error: 'Fichier non trouvé' });
+  }
+  
+  const file = data.results[index];
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${file.translatedName}"`);
+  res.send(file.content);
+});
+
+/**
+ * Route pour télécharger tous les fichiers en ZIP
+ * GET /api/translate/download-zip/:sessionId
+ */
+router.get('/download-zip/:sessionId', async (req, res) => {
+  const { sessionId } = req.params;
+  const data = translationResults.get(sessionId);
+  
+  if (!data) {
+    return res.status(404).json({ error: 'Session expirée ou non trouvée' });
+  }
+  
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="traductions_${data.targetLanguage}.zip"`);
+  
+  const archive = archiver('zip', { zlib: { level: 9 } });
+  archive.pipe(res);
+  
+  for (const result of data.results) {
+    archive.append(result.content, { name: result.translatedName });
+  }
+  
+  await archive.finalize();
 });
 
 /**

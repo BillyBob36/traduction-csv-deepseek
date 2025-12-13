@@ -269,6 +269,72 @@ function createBatches(sourceTexts, batchSize = 50) {
   return batches;
 }
 
+/**
+ * Découpe un CSV en plusieurs parties si > maxSizeBytes
+ * @param {string} csvContent - Contenu CSV complet
+ * @param {string} baseFileName - Nom de base du fichier (sans extension)
+ * @param {string} targetLanguage - Code langue cible
+ * @param {number} maxSizeBytes - Taille max par fichier (défaut 9.5 Mo)
+ * @returns {Array} - [{name: string, content: string}]
+ */
+function splitCSVIfNeeded(csvContent, baseFileName, targetLanguage, maxSizeBytes = 9.5 * 1024 * 1024) {
+  const contentSize = Buffer.byteLength(csvContent, 'utf8');
+  
+  // Si le fichier est assez petit, retourner tel quel
+  if (contentSize <= maxSizeBytes) {
+    return [{
+      name: `${baseFileName}_${targetLanguage}.csv`,
+      content: csvContent
+    }];
+  }
+  
+  console.log(`[Split] Fichier ${baseFileName} fait ${(contentSize / 1024 / 1024).toFixed(2)} Mo, découpage en cours...`);
+  
+  // Séparer les lignes
+  const lines = csvContent.split('\n');
+  const headerLine = lines[0];
+  const headerSize = Buffer.byteLength(headerLine + '\n', 'utf8');
+  
+  const parts = [];
+  let currentPart = [];
+  let currentSize = headerSize; // Commencer avec la taille du header
+  let partNumber = 1;
+  
+  // Parcourir toutes les lignes (sauf le header)
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) continue; // Ignorer les lignes vides
+    
+    const lineSize = Buffer.byteLength(line + '\n', 'utf8');
+    
+    // Si ajouter cette ligne dépasse la limite, sauvegarder la partie actuelle
+    if (currentSize + lineSize > maxSizeBytes && currentPart.length > 0) {
+      parts.push({
+        name: `${baseFileName}_part${partNumber}_${targetLanguage}.csv`,
+        content: headerLine + '\n' + currentPart.join('\n')
+      });
+      partNumber++;
+      currentPart = [];
+      currentSize = headerSize;
+    }
+    
+    currentPart.push(line);
+    currentSize += lineSize;
+  }
+  
+  // Ajouter la dernière partie
+  if (currentPart.length > 0) {
+    parts.push({
+      name: `${baseFileName}_part${partNumber}_${targetLanguage}.csv`,
+      content: headerLine + '\n' + currentPart.join('\n')
+    });
+  }
+  
+  console.log(`[Split] Fichier découpé en ${parts.length} parties`);
+  
+  return parts;
+}
+
 module.exports = {
   parseCSV,
   parseCSVStreaming,
@@ -276,6 +342,7 @@ module.exports = {
   normalizeAndDeduplicateHandles,
   generateCSV,
   createBatches,
+  splitCSVIfNeeded,
   SOURCE_COLUMN_INDEX,
   TARGET_COLUMN_INDEX,
   FIELD_TYPE_COLUMN_INDEX
