@@ -1,24 +1,85 @@
 /**
  * Service OpenAI pour la traduction
- * Alternative à DeepSeek avec gestion des rate limits par tier
+ * - Cellules HTML : 1 par appel (prompt simple)
+ * - Cellules texte simple : batch max 2000 caractères (prompt batch avec [1], [2])
  */
 
-const SYSTEM_PROMPTS = require('../config/prompts');
+const { SYSTEM_PROMPTS, BATCH_PROMPTS } = require('../config/prompts');
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
+const MAX_BATCH_CHARS = 2000; // Max caractères par batch pour texte simple
 
 // Configuration des rate limits par tier pour gpt-4o-mini
-// batchSize=1 : une cellule par appel API pour éviter les problèmes de mapping
-// maxParallel=200 : beaucoup de requêtes parallèles car chaque requête est petite
 const TIER_LIMITS = {
-  1: { rpm: 500, tpm: 200000, maxParallel: 50, batchSize: 1, rampUp: { initial: 20, delay: 2000, step: 15 } },
-  2: { rpm: 500, tpm: 2000000, maxParallel: 100, batchSize: 1, rampUp: { initial: 30, delay: 1500, step: 30 } },
-  3: { rpm: 5000, tpm: 4000000, maxParallel: 200, batchSize: 1, rampUp: { initial: 50, delay: 1000, step: 50 } },
-  4: { rpm: 10000, tpm: 10000000, maxParallel: 300, batchSize: 1, rampUp: { initial: 80, delay: 800, step: 80 } },
-  5: { rpm: 30000, tpm: 150000000, maxParallel: 500, batchSize: 1, rampUp: { initial: 100, delay: 500, step: 100 } }
+  1: { rpm: 500, tpm: 200000, maxParallel: 50, rampUp: { initial: 20, delay: 2000, step: 15 } },
+  2: { rpm: 500, tpm: 2000000, maxParallel: 100, rampUp: { initial: 30, delay: 1500, step: 30 } },
+  3: { rpm: 5000, tpm: 4000000, maxParallel: 200, rampUp: { initial: 50, delay: 1000, step: 50 } },
+  4: { rpm: 10000, tpm: 10000000, maxParallel: 300, rampUp: { initial: 80, delay: 800, step: 80 } },
+  5: { rpm: 30000, tpm: 150000000, maxParallel: 500, rampUp: { initial: 100, delay: 500, step: 100 } }
 };
+
+/**
+ * Détecte si un texte contient du HTML
+ */
+function containsHTML(text) {
+  return text.includes('<') && text.includes('>');
+}
+
+/**
+ * Sépare les textes en HTML (1 par appel) et texte simple (batches de max 2000 chars)
+ * @returns {Array} - Liste de batches, chaque batch = {texts: [], isHTML: boolean, indices: []}
+ */
+function createSmartBatches(uniqueTexts) {
+  const batches = [];
+  const htmlTexts = [];
+  const simpleTexts = [];
+  
+  // Séparer HTML et texte simple
+  for (let i = 0; i < uniqueTexts.length; i++) {
+    const item = { index: i, text: uniqueTexts[i].text, originalIndices: uniqueTexts[i].indices };
+    if (containsHTML(item.text)) {
+      htmlTexts.push(item);
+    } else {
+      simpleTexts.push(item);
+    }
+  }
+  
+  // HTML : 1 par batch
+  for (const item of htmlTexts) {
+    batches.push({
+      texts: [item.text],
+      isHTML: true,
+      items: [item]
+    });
+  }
+  
+  // Texte simple : batches de max 2000 caractères
+  let currentBatch = { texts: [], isHTML: false, items: [], totalChars: 0 };
+  for (const item of simpleTexts) {
+    const textLength = item.text.length;
+    
+    if (currentBatch.totalChars + textLength > MAX_BATCH_CHARS && currentBatch.texts.length > 0) {
+      // Sauvegarder le batch actuel et en créer un nouveau
+      batches.push(currentBatch);
+      currentBatch = { texts: [], isHTML: false, items: [], totalChars: 0 };
+    }
+    
+    currentBatch.texts.push(item.text);
+    currentBatch.items.push(item);
+    currentBatch.totalChars += textLength;
+  }
+  
+  // Ajouter le dernier batch s'il n'est pas vide
+  if (currentBatch.texts.length > 0) {
+    batches.push(currentBatch);
+  }
+  
+  console.log(`[SmartBatch] ${htmlTexts.length} cellules HTML (1/appel), ${simpleTexts.length} textes simples → ${batches.length - htmlTexts.length} batches`);
+  
+  return batches;
+}
 
 // Stats pour le coût
 let openaiStats = {
@@ -58,18 +119,27 @@ function sleep(ms) {
 }
 
 /**
- * Envoie un texte unique à traduire à OpenAI (batchSize=1)
- * Retourne directement la traduction sans parsing complexe
+ * Envoie un batch à traduire à OpenAI
+ * @param {string[]} texts - Textes à traduire
+ * @param {string} targetLanguage - Langue cible
+ * @param {string} apiKey - Clé API
+ * @param {number} tier - Tier OpenAI
+ * @param {boolean} isHTML - Si true, utilise le prompt simple (1 cellule HTML)
  */
-async function translateBatchOpenAI(texts, targetLanguage, apiKey, tier = 3) {
-  const systemPrompt = SYSTEM_PROMPTS[targetLanguage];
+async function translateBatchOpenAI(texts, targetLanguage, apiKey, tier = 3, isHTML = false) {
+  // Choisir le bon prompt selon le type
+  const systemPrompt = isHTML || texts.length === 1 
+    ? SYSTEM_PROMPTS[targetLanguage] 
+    : BATCH_PROMPTS[targetLanguage];
   
   if (!systemPrompt) {
     throw new Error(`Langue non supportée: ${targetLanguage}`);
   }
 
-  // Avec batchSize=1, on envoie directement le texte sans numérotation
-  const userContent = texts.length === 1 ? texts[0] : texts.map((text, i) => `[${i + 1}] ${text}`).join('\n');
+  // HTML ou 1 seul texte : envoi direct. Sinon : format [1], [2], [3]
+  const userContent = (isHTML || texts.length === 1) 
+    ? texts[0] 
+    : texts.map((text, i) => `[${i + 1}] ${text}`).join('\n');
 
   const payload = {
     model: 'gpt-4o-mini',
@@ -128,8 +198,8 @@ async function translateBatchOpenAI(texts, targetLanguage, apiKey, tier = 3) {
 
       const responseText = data.choices[0]?.message?.content || '';
       
-      // Avec batchSize=1, la réponse est directement la traduction
-      const translations = texts.length === 1 
+      // HTML ou 1 seul texte : réponse directe. Sinon : parsing [1], [2], [3]
+      const translations = (isHTML || texts.length === 1) 
         ? [responseText.trim()] 
         : parseTranslations(responseText, texts.length);
 
@@ -288,5 +358,6 @@ module.exports = {
   getOpenAIStats,
   getTierLimits,
   TIER_LIMITS,
-  RampUpController
+  RampUpController,
+  createSmartBatches
 };

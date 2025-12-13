@@ -3,7 +3,9 @@
  * Gère la parallélisation, le retry avec backoff exponentiel, et le monitoring du cache
  */
 
-const SYSTEM_PROMPTS = require('../config/prompts');
+const { BATCH_PROMPTS } = require('../config/prompts');
+// DeepSeek utilise toujours BATCH_PROMPTS car il gère bien les batches
+const SYSTEM_PROMPTS = BATCH_PROMPTS;
 
 // Configuration DeepSeek
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';

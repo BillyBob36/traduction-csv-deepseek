@@ -13,7 +13,7 @@ const router = express.Router();
 
 const { parseCSV, insertTranslations, generateCSV, createBatches } = require('../services/csv');
 const { translateBatch: translateBatchDeepSeek, resetCacheStats, getCacheStats, ParallelController } = require('../services/deepseek');
-const { translateBatchOpenAI, resetOpenAIStats, getOpenAIStats, getTierLimits, TIER_LIMITS, RampUpController } = require('../services/openai');
+const { translateBatchOpenAI, resetOpenAIStats, getOpenAIStats, getTierLimits, TIER_LIMITS, RampUpController, createSmartBatches } = require('../services/openai');
 const LANGUAGES = require('../config/languages');
 
 // Répertoire temporaire pour les fichiers en cours
@@ -232,16 +232,16 @@ router.post('/', upload.array('files'), async (req, res) => {
     }
   }
 
-  // Déterminer le niveau de parallélisation et batchSize selon le provider
+  // Déterminer le niveau de parallélisation selon le provider
   let maxParallel, batchSize, tierLimits;
   if (llmProvider === 'openai') {
     tierLimits = getTierLimits(openaiTier);
     maxParallel = tierLimits.maxParallel;
-    batchSize = tierLimits.batchSize;
-    console.log(`[OpenAI] Tier ${openaiTier}: ${tierLimits.rpm} RPM, ${maxParallel} max parallèles, batch=${batchSize}, rampUp=${tierLimits.rampUp.initial}→${maxParallel}`);
+    console.log(`[OpenAI] Tier ${openaiTier}: ${tierLimits.rpm} RPM, ${maxParallel} max parallèles, rampUp=${tierLimits.rampUp.initial}→${maxParallel}`);
+    console.log(`[OpenAI] Smart batching: HTML=1/appel, texte simple=max 2000 chars/batch`);
   } else {
     maxParallel = 300; // DeepSeek n'a pas de rate limit
-    batchSize = 25;
+    batchSize = 25;    // DeepSeek utilise des batches de 25
   }
 
   console.log(`[Traduction] Début - ${files.length} fichier(s), langue: ${targetLanguage}, provider: ${llmProvider}${testMode ? ` (MODE TEST: ${testLines} lignes max)` : ' (COMPLET)'}`);
@@ -321,44 +321,54 @@ router.post('/', upload.array('files'), async (req, res) => {
 
       console.log(`[Fichier ${fileIndex + 1}/${files.length}] ${fileName} - ${dedup.totalUnique} textes uniques à traduire`);
 
+      // Créer les batches selon le provider
+      let batches;
+      if (llmProvider === 'openai') {
+        // OpenAI : smart batches (HTML 1/appel, texte simple max 2000 chars)
+        batches = createSmartBatches(uniqueTexts);
+      } else {
+        // DeepSeek : batches classiques de 25
+        batches = createBatches(
+          uniqueTexts.map((u, i) => ({ index: i, text: u.text, indices: u.indices })), 
+          batchSize
+        ).map(batch => ({
+          texts: batch.map(item => item.text),
+          isHTML: false,
+          items: batch.map(item => ({ index: item.index, text: item.text, originalIndices: uniqueTexts[item.index].indices }))
+        }));
+      }
+
       sendSSE(sessionId, {
         type: 'file_start',
         fileIndex,
         fileName,
         linesToTranslate: dedup.totalOriginal,
-        uniqueToTranslate: dedup.totalUnique
+        uniqueToTranslate: dedup.totalUnique,
+        totalBatches: batches.length
       });
 
-      // Créer les batches avec la taille adaptée au provider/tier
-      const batches = createBatches(
-        uniqueTexts.map((u, i) => ({ index: i, text: u.text, indices: u.indices })), 
-        batchSize
-      );
       let fileProcessedBatches = 0;
       let fileProcessedTexts = 0;
 
       // Traiter les batches en parallèle
       const batchPromises = batches.map((batch, batchIndex) => 
         parallelController.execute(async () => {
-          const texts = batch.map(item => item.text);
-          
           try {
             // Appeler le bon provider
             let translations;
             if (llmProvider === 'openai') {
-              const result = await translateBatchOpenAI(texts, targetLanguage, apiKey, openaiTier);
+              const result = await translateBatchOpenAI(batch.texts, targetLanguage, apiKey, openaiTier, batch.isHTML);
               translations = result.translations;
             } else {
-              const result = await translateBatchDeepSeek(texts, targetLanguage, apiKey);
+              const result = await translateBatchDeepSeek(batch.texts, targetLanguage, apiKey);
               translations = result.translations;
             }
             
             // Sauvegarder chaque traduction dans le fichier temp
-            for (let i = 0; i < batch.length; i++) {
-              const item = batch[i];
+            for (let i = 0; i < batch.items.length; i++) {
+              const item = batch.items[i];
               const translation = translations[i] || '';
-              const originalIndices = uniqueTexts[item.index].indices;
-              saveTempTranslation(sessionId, fileIndex, item.text, translation, originalIndices);
+              saveTempTranslation(sessionId, fileIndex, item.text, translation, item.originalIndices);
               
               // Incrémenter les compteurs
               fileProcessedTexts++;
@@ -367,34 +377,31 @@ router.post('/', upload.array('files'), async (req, res) => {
 
             fileProcessedBatches++;
             
-            // Envoyer update de progression toutes les 200 réponses (ou à la fin)
-            if (globalProcessedUnique % 200 === 0 || globalProcessedUnique === globalTotalUnique) {
-              const stats = llmProvider === 'openai' ? getOpenAIStats() : getCacheStats();
-              const percentComplete = Math.round((globalProcessedUnique / globalTotalUnique) * 100);
-              sendSSE(sessionId, {
-                type: 'progress',
-                fileIndex,
-                fileName,
-                fileProcessedTexts,
-                fileTotalTexts: dedup.totalUnique,
-                globalProcessedUnique,
-                globalTotalUnique,
-                globalProcessedLines: Math.round((globalProcessedUnique / globalTotalUnique) * globalTotalOriginal),
-                globalTotalLines: globalTotalOriginal,
-                percentComplete,
-                batchesCompleted: fileProcessedBatches,
-                totalBatches: batches.length,
-                llmProvider,
-                cacheStats: stats
-              });
-            }
+            // Envoyer update de progression à chaque batch complété
+            const stats = llmProvider === 'openai' ? getOpenAIStats() : getCacheStats();
+            const percentComplete = Math.round((globalProcessedUnique / globalTotalUnique) * 100);
+            sendSSE(sessionId, {
+              type: 'progress',
+              fileIndex,
+              fileName,
+              fileProcessedTexts,
+              fileTotalTexts: dedup.totalUnique,
+              globalProcessedUnique,
+              globalTotalUnique,
+              globalProcessedLines: Math.round((globalProcessedUnique / globalTotalUnique) * globalTotalOriginal),
+              globalTotalLines: globalTotalOriginal,
+              percentComplete,
+              batchesCompleted: fileProcessedBatches,
+              totalBatches: batches.length,
+              llmProvider,
+              cacheStats: stats
+            });
 
           } catch (error) {
             console.error(`[Batch ${batchIndex}] Erreur:`, error.message);
             // En cas d'erreur, sauvegarder avec message d'erreur
-            for (const item of batch) {
-              const originalIndices = uniqueTexts[item.index].indices;
-              saveTempTranslation(sessionId, fileIndex, item.text, `[ERREUR: ${error.message}]`, originalIndices);
+            for (const item of batch.items) {
+              saveTempTranslation(sessionId, fileIndex, item.text, `[ERREUR: ${error.message}]`, item.originalIndices);
               fileProcessedTexts++;
               globalProcessedUnique++;
             }

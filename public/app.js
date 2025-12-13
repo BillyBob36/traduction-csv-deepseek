@@ -434,9 +434,17 @@ function handleSSEMessage(data) {
 
     case 'file_start':
       elements.currentFileName.textContent = data.fileName;
-      // Afficher info déduplication du fichier
+      // Afficher info déduplication et batches du fichier
       if (data.uniqueToTranslate) {
-        elements.currentFileName.textContent = `${data.fileName} (${data.uniqueToTranslate} uniques / ${data.linesToTranslate} lignes)`;
+        let info = `${data.fileName} (${data.uniqueToTranslate} uniques / ${data.linesToTranslate} lignes)`;
+        if (data.totalBatches) {
+          info += ` - ${data.totalBatches} batches`;
+        }
+        elements.currentFileName.textContent = info;
+      }
+      // Réinitialiser la progression des batches
+      if (data.totalBatches) {
+        elements.progressLines.textContent = `0/${data.linesToTranslate} (batch 0/${data.totalBatches})`;
       }
       break;
 

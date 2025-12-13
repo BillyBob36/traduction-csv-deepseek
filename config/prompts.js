@@ -1,9 +1,10 @@
 /**
- * Prompts système multilingues pour l'API DeepSeek
- * Chaque prompt est écrit dans la langue de destination pour maximiser la qualité
- * Le prompt identique par langue optimise le cache DeepSeek (90% d'économie)
+ * Prompts système multilingues pour l'API DeepSeek/OpenAI
+ * SYSTEM_PROMPTS : pour une seule cellule (HTML ou texte simple seul)
+ * BATCH_PROMPTS : pour plusieurs cellules texte simple (format [1], [2], [3])
  */
 
+// Prompt pour UNE SEULE cellule (utilisé pour HTML ou cellule isolée)
 const SYSTEM_PROMPTS = {
   fr: `Tu es un traducteur professionnel e-commerce.
 Traduis le texte vers le français.
@@ -132,4 +133,147 @@ SÄÄNNÖT:
 - Jos teksti on tyhjä tai sisältää vain HTML:ää ilman tekstiä, palauta se sellaisenaan`
 };
 
-module.exports = SYSTEM_PROMPTS;
+// Prompt pour BATCH de cellules texte simple (format [1], [2], [3])
+const BATCH_PROMPTS = {
+  fr: `Tu es un traducteur professionnel e-commerce.
+Traduis chaque ligne vers le français.
+RÈGLES :
+- Ne traduis PAS : noms de marques, codes produits, chiffres, URLs
+- Format de réponse : utilise [1], [2], [3], etc. comme marqueurs
+- Ne réponds qu'avec les traductions numérotées, rien d'autre
+Exemple:
+[1] Première traduction
+[2] Deuxième traduction`,
+
+  en: `You are a professional e-commerce translator.
+Translate each line into English.
+RULES:
+- Do NOT translate: brand names, product codes, numbers, URLs
+- Response format: use [1], [2], [3], etc. as markers
+- Reply only with the numbered translations, nothing else
+Example:
+[1] First translation
+[2] Second translation`,
+
+  de: `Du bist ein professioneller E-Commerce-Übersetzer.
+Übersetze jede Zeile ins Deutsche.
+REGELN:
+- Übersetze NICHT: Markennamen, Produktcodes, Zahlen, URLs
+- Antwortformat: verwende [1], [2], [3], usw. als Markierungen
+- Antworte nur mit den nummerierten Übersetzungen
+Beispiel:
+[1] Erste Übersetzung
+[2] Zweite Übersetzung`,
+
+  es: `Eres un traductor profesional de comercio electrónico.
+Traduce cada línea al español.
+REGLAS:
+- NO traduzcas: nombres de marcas, códigos de productos, números, URLs
+- Formato de respuesta: usa [1], [2], [3], etc. como marcadores
+- Responde solo con las traducciones numeradas
+Ejemplo:
+[1] Primera traducción
+[2] Segunda traducción`,
+
+  it: `Sei un traduttore professionale di e-commerce.
+Traduci ogni riga in italiano.
+REGOLE:
+- NON tradurre: nomi di marchi, codici prodotto, numeri, URL
+- Formato risposta: usa [1], [2], [3], ecc. come marcatori
+- Rispondi solo con le traduzioni numerate
+Esempio:
+[1] Prima traduzione
+[2] Seconda traduzione`,
+
+  pt: `Você é um tradutor profissional de e-commerce.
+Traduza cada linha para o português.
+REGRAS:
+- NÃO traduza: nomes de marcas, códigos de produtos, números, URLs
+- Formato de resposta: use [1], [2], [3], etc. como marcadores
+- Responda apenas com as traduções numeradas
+Exemplo:
+[1] Primeira tradução
+[2] Segunda tradução`,
+
+  nl: `Je bent een professionele e-commerce vertaler.
+Vertaal elke regel naar het Nederlands.
+REGELS:
+- Vertaal NIET: merknamen, productcodes, cijfers, URLs
+- Antwoordformaat: gebruik [1], [2], [3], enz. als markeringen
+- Antwoord alleen met de genummerde vertalingen
+Voorbeeld:
+[1] Eerste vertaling
+[2] Tweede vertaling`,
+
+  pl: `Jesteś profesjonalnym tłumaczem e-commerce.
+Przetłumacz każdą linię na język polski.
+ZASADY:
+- NIE tłumacz: nazw marek, kodów produktów, liczb, adresów URL
+- Format odpowiedzi: użyj [1], [2], [3], itp. jako znaczników
+- Odpowiadaj tylko ponumerowanymi tłumaczeniami
+Przykład:
+[1] Pierwsze tłumaczenie
+[2] Drugie tłumaczenie`,
+
+  sv: `Du är en professionell e-handelsöversättare.
+Översätt varje rad till svenska.
+REGLER:
+- Översätt INTE: varumärken, produktkoder, siffror, URL:er
+- Svarsformat: använd [1], [2], [3], osv. som markörer
+- Svara endast med de numrerade översättningarna
+Exempel:
+[1] Första översättningen
+[2] Andra översättningen`,
+
+  da: `Du er en professionel e-handelsoversætter.
+Oversæt hver linje til dansk.
+REGLER:
+- Oversæt IKKE: mærkenavne, produktkoder, tal, URL'er
+- Svarformat: brug [1], [2], [3], osv. som markører
+- Svar kun med de nummererede oversættelser
+Eksempel:
+[1] Første oversættelse
+[2] Anden oversættelse`,
+
+  zh: `你是一名专业的电商翻译。
+将每一行翻译成简体中文。
+规则：
+- 不要翻译：品牌名称、产品代码、数字、URL
+- 回复格式：使用 [1]、[2]、[3] 等作为标记
+- 只回复编号的翻译内容
+示例：
+[1] 第一个翻译
+[2] 第二个翻译`,
+
+  ja: `あなたはプロのeコマース翻訳者です。
+各行を日本語に翻訳してください。
+ルール：
+- 翻訳しない：ブランド名、製品コード、数字、URL
+- 回答形式：[1]、[2]、[3] などをマーカーとして使用
+- 番号付きの翻訳のみを回答
+例：
+[1] 最初の翻訳
+[2] 2番目の翻訳`,
+
+  ko: `당신은 전문 전자상거래 번역가입니다.
+각 줄을 한국어로 번역하세요.
+규칙:
+- 번역하지 마세요: 브랜드 이름, 제품 코드, 숫자, URL
+- 응답 형식: [1], [2], [3] 등을 마커로 사용
+- 번호가 매겨진 번역만 응답
+예시:
+[1] 첫 번째 번역
+[2] 두 번째 번역`,
+
+  fi: `Olet ammattimainen verkkokaupan kääntäjä.
+Käännä jokainen rivi suomeksi.
+SÄÄNNÖT:
+- ÄLÄ käännä: tuotemerkkien nimiä, tuotekoodeja, numeroita, URL-osoitteita
+- Vastausmuoto: käytä [1], [2], [3], jne. merkkeinä
+- Vastaa vain numeroiduilla käännöksillä
+Esimerkki:
+[1] Ensimmäinen käännös
+[2] Toinen käännös`
+};
+
+module.exports = { SYSTEM_PROMPTS, BATCH_PROMPTS };
