@@ -10,12 +10,14 @@ const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
 
 // Configuration des rate limits par tier pour gpt-4o-mini
+// batchSize réduit pour éviter troncation des réponses longues
+// rampUp: démarrage progressif pour éviter les 502
 const TIER_LIMITS = {
-  1: { rpm: 500, tpm: 200000, maxParallel: 30, delayBetweenBatches: 150 },
-  2: { rpm: 500, tpm: 2000000, maxParallel: 50, delayBetweenBatches: 150 },
-  3: { rpm: 5000, tpm: 4000000, maxParallel: 200, delayBetweenBatches: 20 },
-  4: { rpm: 10000, tpm: 10000000, maxParallel: 300, delayBetweenBatches: 10 },
-  5: { rpm: 30000, tpm: 150000000, maxParallel: 500, delayBetweenBatches: 5 }
+  1: { rpm: 500, tpm: 200000, maxParallel: 30, batchSize: 8, rampUp: { initial: 10, delay: 2000, step: 10 } },
+  2: { rpm: 500, tpm: 2000000, maxParallel: 50, batchSize: 10, rampUp: { initial: 15, delay: 1500, step: 15 } },
+  3: { rpm: 5000, tpm: 4000000, maxParallel: 100, batchSize: 10, rampUp: { initial: 30, delay: 1000, step: 30 } },
+  4: { rpm: 10000, tpm: 10000000, maxParallel: 150, batchSize: 12, rampUp: { initial: 40, delay: 800, step: 40 } },
+  5: { rpm: 30000, tpm: 150000000, maxParallel: 250, batchSize: 15, rampUp: { initial: 60, delay: 500, step: 60 } }
 };
 
 // Stats pour le coût
@@ -75,7 +77,7 @@ async function translateBatchOpenAI(texts, targetLanguage, apiKey, tier = 3) {
       { role: 'user', content: userContent }
     ],
     temperature: 0.1,
-    max_tokens: 8192
+    max_tokens: 16384
   };
 
   let lastError = null;
@@ -187,10 +189,85 @@ function parseTranslations(responseText, expectedCount) {
   return translations.slice(0, expectedCount);
 }
 
+/**
+ * Contrôleur de parallélisation avec ramp-up progressif
+ * Démarre avec peu de connexions puis monte progressivement
+ */
+class RampUpController {
+  constructor(tierConfig) {
+    this.maxConcurrent = tierConfig.maxParallel;
+    this.currentLimit = tierConfig.rampUp.initial;
+    this.rampUpDelay = tierConfig.rampUp.delay;
+    this.rampUpStep = tierConfig.rampUp.step;
+    this.running = 0;
+    this.queue = [];
+    this.lastRampUp = Date.now();
+    this.totalProcessed = 0;
+  }
+
+  async execute(fn) {
+    return new Promise((resolve, reject) => {
+      const task = async () => {
+        this.running++;
+        try {
+          const result = await fn();
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        } finally {
+          this.running--;
+          this.totalProcessed++;
+          this.processQueue();
+        }
+      };
+
+      // Ramp-up progressif : augmenter la limite si délai écoulé
+      this.checkRampUp();
+
+      if (this.running < this.currentLimit) {
+        task();
+      } else {
+        this.queue.push(task);
+      }
+    });
+  }
+
+  checkRampUp() {
+    const now = Date.now();
+    if (this.currentLimit < this.maxConcurrent && now - this.lastRampUp >= this.rampUpDelay) {
+      const oldLimit = this.currentLimit;
+      this.currentLimit = Math.min(this.currentLimit + this.rampUpStep, this.maxConcurrent);
+      this.lastRampUp = now;
+      if (this.currentLimit !== oldLimit) {
+        console.log(`[RampUp] Parallélisation: ${oldLimit} → ${this.currentLimit}/${this.maxConcurrent}`);
+      }
+    }
+  }
+
+  processQueue() {
+    this.checkRampUp();
+    while (this.queue.length > 0 && this.running < this.currentLimit) {
+      const nextTask = this.queue.shift();
+      nextTask();
+    }
+  }
+
+  getStats() {
+    return {
+      running: this.running,
+      queued: this.queue.length,
+      currentLimit: this.currentLimit,
+      maxLimit: this.maxConcurrent,
+      totalProcessed: this.totalProcessed
+    };
+  }
+}
+
 module.exports = {
   translateBatchOpenAI,
   resetOpenAIStats,
   getOpenAIStats,
   getTierLimits,
-  TIER_LIMITS
+  TIER_LIMITS,
+  RampUpController
 };

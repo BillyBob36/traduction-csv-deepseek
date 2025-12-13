@@ -56,10 +56,8 @@ const elements = {
   estTime: document.getElementById('estTime'),
   // Test mode
   testSection: document.getElementById('testSection'),
-  testModeCheckbox: document.getElementById('testModeCheckbox'),
-  testLinesInput: document.getElementById('testLinesInput'),
   testLinesCount: document.getElementById('testLinesCount'),
-  testBtn: document.getElementById('testBtn'),
+  testHint: document.getElementById('testHint'),
   // LLM Provider
   llmSection: document.getElementById('llmSection'),
   llmProviderRadios: document.getElementsByName('llmProvider'),
@@ -146,24 +144,21 @@ function setupEventListeners() {
     }
   });
 
-  // Translate button
-  elements.translateBtn.addEventListener('click', () => startTranslation(false));
-
-  // Test mode checkbox
-  elements.testModeCheckbox.addEventListener('change', (e) => {
-    state.testMode = e.target.checked;
-    elements.testLinesInput.hidden = !state.testMode;
-    elements.testBtn.hidden = !state.testMode;
-    elements.translateBtn.hidden = state.testMode;
+  // Translate button - détermine automatiquement si c'est un test (testLines > 0)
+  elements.translateBtn.addEventListener('click', () => {
+    const testLines = parseInt(elements.testLinesCount.value) || 0;
+    state.testLines = testLines;
+    state.testMode = testLines > 0;
+    startTranslation(state.testMode);
   });
 
-  // Test lines count
-  elements.testLinesCount.addEventListener('change', (e) => {
-    state.testLines = parseInt(e.target.value) || 10;
+  // Test lines count - met à jour le hint
+  elements.testLinesCount.addEventListener('input', (e) => {
+    const value = parseInt(e.target.value) || 0;
+    state.testLines = value;
+    state.testMode = value > 0;
+    elements.testHint.textContent = value > 0 ? `Test: ${value} lignes` : 'Traduction complète';
   });
-
-  // Test button
-  elements.testBtn.addEventListener('click', () => startTranslation(true));
 
   // LLM Provider selection
   elements.llmProviderRadios.forEach(radio => {
@@ -445,12 +440,20 @@ function handleSSEMessage(data) {
       updateProgress(
         data.percentComplete,
         data.globalProcessedLines || 0,
-        data.globalTotalLines || 0
+        data.globalTotalLines || 0,
+        data.batchesCompleted,
+        data.totalBatches
       );
       
       if (data.cacheStats) {
-        elements.cacheHitRate.textContent = `${data.cacheStats.hitRate}%`;
-        elements.currentCost.textContent = `$${data.cacheStats.estimatedCost.toFixed(4)}`;
+        // Pour OpenAI, afficher le coût estimé
+        if (data.cacheStats.estimatedCost !== undefined) {
+          elements.cacheHitRate.textContent = `${data.cacheStats.requestCount || 0} req`;
+          elements.currentCost.textContent = `$${data.cacheStats.estimatedCost.toFixed(4)}`;
+        } else {
+          elements.cacheHitRate.textContent = `${data.cacheStats.hitRate}%`;
+          elements.currentCost.textContent = `$${data.cacheStats.estimatedCost?.toFixed(4) || '0.00'}`;
+        }
       }
       break;
 
@@ -479,10 +482,16 @@ function handleSSEMessage(data) {
 /**
  * Met à jour la barre de progression
  */
-function updateProgress(percent, processed, total) {
+function updateProgress(percent, processed, total, batchesCompleted, totalBatches) {
   elements.progressPercent.textContent = `${percent}%`;
   elements.progressFill.style.width = `${percent}%`;
-  elements.progressLines.textContent = `${processed.toLocaleString()}/${total.toLocaleString()}`;
+  
+  // Afficher les lignes et optionnellement les batches
+  let linesText = `${processed.toLocaleString()}/${total.toLocaleString()}`;
+  if (batchesCompleted !== undefined && totalBatches !== undefined) {
+    linesText += ` (batch ${batchesCompleted}/${totalBatches})`;
+  }
+  elements.progressLines.textContent = linesText;
 }
 
 /**
@@ -584,10 +593,9 @@ function resetApp() {
 
   // Reset test mode
   state.testMode = false;
-  elements.testModeCheckbox.checked = false;
-  elements.testLinesInput.hidden = true;
-  elements.testBtn.hidden = true;
-  elements.translateBtn.hidden = false;
+  state.testLines = 0;
+  elements.testLinesCount.value = '0';
+  elements.testHint.textContent = 'Traduction complète';
 
   // Reset LLM provider
   state.llmProvider = 'deepseek';
