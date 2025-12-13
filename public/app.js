@@ -13,7 +13,7 @@ const state = {
   translationSessionId: null, // Session pour téléchargement des résultats
   isTranslating: false,
   testMode: false,
-  testLines: 10,
+  testLines: 0,
   llmProvider: 'deepseek',
   openaiApiKey: '',
   openaiTier: 3
