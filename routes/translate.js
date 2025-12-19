@@ -314,7 +314,7 @@ router.post('/', upload.array('files'), async (req, res) => {
   // TRADUCTION EN ARRIÈRE-PLAN (ne bloque pas la réponse HTTP)
   runTranslationInBackground({
     sessionId, startTime, targetLanguage, files, testMode, testLines,
-    llmProvider, apiKey, tierLimits, maxParallel, batchSize
+    llmProvider, apiKey, tierLimits, maxParallel, batchSize, openaiTier
   });
 });
 
@@ -323,7 +323,7 @@ router.post('/', upload.array('files'), async (req, res) => {
  */
 async function runTranslationInBackground(params) {
   const { sessionId, startTime, targetLanguage, files, testMode, testLines,
-    llmProvider, apiKey, tierLimits, maxParallel, batchSize } = params;
+    llmProvider, apiKey, tierLimits, maxParallel, batchSize, openaiTier } = params;
 
   try {
     const results = [];
