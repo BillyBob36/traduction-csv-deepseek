@@ -209,6 +209,17 @@ function setupEventListeners() {
 
   // Historique toggle
   elements.historyToggle.addEventListener('click', toggleHistory);
+
+  // Délégation d'événements pour les boutons de téléchargement de l'historique
+  elements.historyList.addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-download-history');
+    if (btn) {
+      const sessionId = btn.dataset.sessionId;
+      if (sessionId) {
+        downloadHistoryZip(sessionId);
+      }
+    }
+  });
 }
 
 /**
@@ -831,7 +842,7 @@ function renderHistory(history) {
           </div>
         </div>
         <div class="history-item-actions">
-          <button class="btn btn-secondary" onclick="downloadHistoryZip('${item.sessionId}')">
+          <button class="btn btn-secondary btn-download-history" data-session-id="${item.sessionId}">
             <i class="fas fa-download"></i>
           </button>
         </div>
