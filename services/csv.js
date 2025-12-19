@@ -271,6 +271,7 @@ function createBatches(sourceTexts, batchSize = 50) {
 
 /**
  * Découpe un CSV en plusieurs parties si > maxSizeBytes
+ * Respecte les lignes CSV logiques (champs multi-lignes entre guillemets)
  * @param {string} csvContent - Contenu CSV complet
  * @param {string} baseFileName - Nom de base du fichier (sans extension)
  * @param {string} targetLanguage - Code langue cible
@@ -290,9 +291,17 @@ function splitCSVIfNeeded(csvContent, baseFileName, targetLanguage, maxSizeBytes
   
   console.log(`[Split] Fichier ${baseFileName} fait ${(contentSize / 1024 / 1024).toFixed(2)} Mo, découpage en cours...`);
   
-  // Séparer les lignes
-  const lines = csvContent.split('\n');
-  const headerLine = lines[0];
+  // Parser correctement le CSV pour respecter les lignes logiques (champs multi-lignes)
+  const csvLines = parseCSVLines(csvContent);
+  
+  if (csvLines.length === 0) {
+    return [{
+      name: `${baseFileName}_${targetLanguage}.csv`,
+      content: csvContent
+    }];
+  }
+  
+  const headerLine = csvLines[0];
   const headerSize = Buffer.byteLength(headerLine + '\n', 'utf8');
   
   const parts = [];
@@ -300,9 +309,9 @@ function splitCSVIfNeeded(csvContent, baseFileName, targetLanguage, maxSizeBytes
   let currentSize = headerSize; // Commencer avec la taille du header
   let partNumber = 1;
   
-  // Parcourir toutes les lignes (sauf le header)
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
+  // Parcourir toutes les lignes CSV logiques (sauf le header)
+  for (let i = 1; i < csvLines.length; i++) {
+    const line = csvLines[i];
     if (!line.trim()) continue; // Ignorer les lignes vides
     
     const lineSize = Buffer.byteLength(line + '\n', 'utf8');
@@ -333,6 +342,57 @@ function splitCSVIfNeeded(csvContent, baseFileName, targetLanguage, maxSizeBytes
   console.log(`[Split] Fichier découpé en ${parts.length} parties`);
   
   return parts;
+}
+
+/**
+ * Parse un contenu CSV et retourne les lignes logiques complètes
+ * Gère correctement les champs multi-lignes entre guillemets
+ * @param {string} csvContent - Contenu CSV brut
+ * @returns {Array<string>} - Tableau des lignes CSV logiques
+ */
+function parseCSVLines(csvContent) {
+  const lines = [];
+  let currentLine = '';
+  let insideQuotes = false;
+  
+  for (let i = 0; i < csvContent.length; i++) {
+    const char = csvContent[i];
+    const nextChar = csvContent[i + 1];
+    
+    if (char === '"') {
+      // Guillemet échappé "" -> reste dans le champ
+      if (insideQuotes && nextChar === '"') {
+        currentLine += '""';
+        i++; // Sauter le prochain guillemet
+      } else {
+        // Bascule l'état inside/outside quotes
+        insideQuotes = !insideQuotes;
+        currentLine += char;
+      }
+    } else if (char === '\n' && !insideQuotes) {
+      // Fin de ligne logique (pas à l'intérieur d'un champ quoté)
+      if (currentLine.trim()) {
+        lines.push(currentLine);
+      }
+      currentLine = '';
+    } else if (char === '\r' && nextChar === '\n' && !insideQuotes) {
+      // Gestion CRLF Windows
+      if (currentLine.trim()) {
+        lines.push(currentLine);
+      }
+      currentLine = '';
+      i++; // Sauter le \n
+    } else {
+      currentLine += char;
+    }
+  }
+  
+  // Ajouter la dernière ligne si non vide
+  if (currentLine.trim()) {
+    lines.push(currentLine);
+  }
+  
+  return lines;
 }
 
 module.exports = {
