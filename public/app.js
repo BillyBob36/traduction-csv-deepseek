@@ -577,6 +577,11 @@ function handleSSEMessage(data) {
     case 'complete':
       console.log('[SSE] Traduction terminée, réception des fichiers');
       
+      // Stocker le sessionId pour les téléchargements
+      if (data.sessionId) {
+        state.translationSessionId = data.sessionId;
+      }
+      
       // Stocker les infos pour téléchargement (reçues via SSE)
       if (data.files && data.files.length > 0) {
         state.translatedFiles = data.files.map(f => ({

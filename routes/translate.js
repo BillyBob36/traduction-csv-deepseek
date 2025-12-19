@@ -551,6 +551,7 @@ async function runTranslationInBackground(params) {
     // Envoyer les infos de téléchargement via SSE (le frontend n'attend plus la réponse HTTP)
     sendSSE(sessionId, {
       type: 'complete',
+      sessionId,
       duration,
       llmProvider,
       cacheStats: finalStats,
