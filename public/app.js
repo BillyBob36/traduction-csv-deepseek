@@ -394,13 +394,24 @@ async function startTranslation(isTest = false) {
       body: formData
     });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Erreur traduction');
+    // Lire la réponse en texte d'abord pour vérifier si c'est du JSON
+    const responseText = await response.text();
+    
+    // Vérifier si la réponse est du HTML (erreur serveur)
+    if (responseText.trim().startsWith('<') || responseText.includes('<!DOCTYPE')) {
+      throw new Error('Le serveur a renvoyé une erreur. Veuillez réessayer.');
+    }
+    
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      throw new Error('Réponse invalide du serveur. Veuillez réessayer.');
     }
 
-    // Récupérer les métadonnées des fichiers traduits
-    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Erreur traduction');
+    }
     
     if (!data.success) {
       throw new Error(data.error || 'Erreur traduction');
