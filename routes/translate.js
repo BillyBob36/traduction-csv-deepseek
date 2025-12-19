@@ -14,7 +14,11 @@ const router = express.Router();
 const { parseCSV, insertTranslations, normalizeAndDeduplicateHandles, generateCSV, createBatches, splitCSVIfNeeded } = require('../services/csv');
 const { translateBatch: translateBatchDeepSeek, resetCacheStats, getCacheStats, ParallelController, createSmartBatchesDeepSeek } = require('../services/deepseek');
 const { translateBatchOpenAI, resetOpenAIStats, getOpenAIStats, getTierLimits, TIER_LIMITS, RampUpController, createSmartBatches } = require('../services/openai');
+const { initStorage, saveTranslation, getHistory, getSession, getFileContent, isStorageAvailable } = require('../services/storage');
 const LANGUAGES = require('../config/languages');
+
+// Initialiser le stockage persistant au démarrage
+initStorage();
 
 // Répertoire temporaire pour les fichiers en cours
 const TEMP_DIR = process.env.TEMP_DIR || '/tmp/csv-translator';
@@ -529,11 +533,19 @@ async function runTranslationInBackground(params) {
       console.log(`[Traduction] Terminé en ${duration}s - DeepSeek - Cache hit: ${finalStats.hitRate}% - Dédup: ${globalTotalOriginal} → ${globalTotalUnique}`);
     }
 
-    // Stocker les résultats pour téléchargement ultérieur
+    // Stocker les résultats pour téléchargement ultérieur (en mémoire)
     translationResults.set(sessionId, {
       results,
       targetLanguage,
       createdAt: Date.now()
+    });
+
+    // SAUVEGARDER SUR DISQUE PERSISTANT (historique des 10 dernières traductions)
+    saveTranslation(sessionId, {
+      results,
+      targetLanguage,
+      duration,
+      stats: finalStats
     });
 
     // Envoyer les infos de téléchargement via SSE (le frontend n'attend plus la réponse HTTP)
@@ -794,6 +806,84 @@ router.post('/estimate', upload.array('files'), async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+/**
+ * Route pour récupérer l'historique des traductions
+ * GET /api/translate/history
+ */
+router.get('/history', (req, res) => {
+  const history = getHistory();
+  res.json({
+    success: true,
+    count: history.length,
+    maxHistory: 10,
+    storageAvailable: isStorageAvailable(),
+    history
+  });
+});
+
+/**
+ * Route pour récupérer une session depuis l'historique
+ * GET /api/translate/history/:sessionId
+ */
+router.get('/history/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+  const session = getSession(sessionId);
+  
+  if (!session) {
+    return res.status(404).json({ error: 'Session non trouvée dans l\'historique' });
+  }
+  
+  res.json({
+    success: true,
+    session
+  });
+});
+
+/**
+ * Route pour télécharger un fichier depuis l'historique
+ * GET /api/translate/history/:sessionId/download/:fileName
+ */
+router.get('/history/:sessionId/download/:fileName', (req, res) => {
+  const { sessionId, fileName } = req.params;
+  const content = getFileContent(sessionId, fileName);
+  
+  if (!content) {
+    return res.status(404).json({ error: 'Fichier non trouvé dans l\'historique' });
+  }
+  
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.send(content);
+});
+
+/**
+ * Route pour télécharger tous les fichiers d'une session en ZIP depuis l'historique
+ * GET /api/translate/history/:sessionId/download-zip
+ */
+router.get('/history/:sessionId/download-zip', async (req, res) => {
+  const { sessionId } = req.params;
+  const session = getSession(sessionId);
+  
+  if (!session) {
+    return res.status(404).json({ error: 'Session non trouvée dans l\'historique' });
+  }
+  
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="traductions_${session.targetLanguage}_${sessionId}.zip"`);
+  
+  const archive = archiver('zip', { zlib: { level: 9 } });
+  archive.pipe(res);
+  
+  for (const file of session.files) {
+    const content = getFileContent(sessionId, file.name);
+    if (content) {
+      archive.append(content, { name: file.name });
+    }
+  }
+  
+  await archive.finalize();
 });
 
 module.exports = router;

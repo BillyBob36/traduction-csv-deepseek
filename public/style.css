@@ -664,3 +664,128 @@ section:not([hidden]) {
 .fa-spin {
   animation: spin 1s linear infinite;
 }
+
+/* Section Historique */
+.history-section {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  cursor: pointer;
+  transition: background 0.2s;
+  gap: 0.75rem;
+}
+
+.history-header:hover {
+  background: var(--bg-color);
+}
+
+.history-header h4 {
+  flex: 1;
+  margin: 0;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.history-badge {
+  background: var(--primary-color);
+  color: white;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.history-arrow {
+  color: var(--text-secondary);
+  transition: transform 0.3s;
+}
+
+.history-arrow.open {
+  transform: rotate(180deg);
+}
+
+.history-content {
+  border-top: 1px solid var(--border-color);
+  padding: 1rem 1.5rem;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.history-empty {
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 1rem;
+  font-style: italic;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-color);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+}
+
+.history-item:hover {
+  background: #e2e8f0;
+}
+
+.history-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.history-item-date {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+}
+
+.history-item-files {
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-item-meta {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.history-item-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.history-item-actions .btn {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.history-lang-badge {
+  background: var(--success-color);
+  color: white;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}

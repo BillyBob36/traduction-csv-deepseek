@@ -65,7 +65,14 @@ const elements = {
   openaiConfig: document.getElementById('openaiConfig'),
   openaiApiKey: document.getElementById('openaiApiKey'),
   openaiTier: document.getElementById('openaiTier'),
-  uploadSection: document.getElementById('uploadSection')
+  uploadSection: document.getElementById('uploadSection'),
+  // Historique
+  historySection: document.getElementById('historySection'),
+  historyToggle: document.getElementById('historyToggle'),
+  historyContent: document.getElementById('historyContent'),
+  historyList: document.getElementById('historyList'),
+  historyBadge: document.getElementById('historyBadge'),
+  historyArrow: document.getElementById('historyArrow')
 };
 
 /**
@@ -74,6 +81,9 @@ const elements = {
 async function init() {
   // Charger les langues disponibles
   await loadLanguages();
+  
+  // Charger l'historique des traductions
+  await loadHistory();
   
   // Configurer les événements
   setupEventListeners();
@@ -196,6 +206,9 @@ function setupEventListeners() {
   elements.downloadAllBtn.addEventListener('click', downloadAll);
   elements.newTranslationBtn.addEventListener('click', resetApp);
   elements.retryBtn.addEventListener('click', () => startTranslation(false));
+
+  // Historique toggle
+  elements.historyToggle.addEventListener('click', toggleHistory);
 }
 
 /**
@@ -578,6 +591,9 @@ function handleSSEMessage(data) {
       state.isTranslating = false;
       disconnectSSE();
       showResults();
+      
+      // Rafraîchir l'historique
+      loadHistory();
       break;
 
     case 'error':
@@ -755,6 +771,99 @@ function extractFilename(contentDisposition) {
     return match[1].replace(/['"]/g, '');
   }
   return null;
+}
+
+/**
+ * Charge l'historique des traductions depuis le serveur
+ */
+async function loadHistory() {
+  try {
+    const response = await fetch('/api/translate/history');
+    const data = await response.json();
+    
+    if (data.success) {
+      renderHistory(data.history);
+      elements.historyBadge.textContent = data.count;
+    }
+  } catch (error) {
+    console.error('[Historique] Erreur chargement:', error);
+  }
+}
+
+/**
+ * Toggle l'affichage de l'historique
+ */
+function toggleHistory() {
+  const isHidden = elements.historyContent.hidden;
+  elements.historyContent.hidden = !isHidden;
+  elements.historyArrow.classList.toggle('open', isHidden);
+}
+
+/**
+ * Affiche l'historique des traductions
+ */
+function renderHistory(history) {
+  if (!history || history.length === 0) {
+    elements.historyList.innerHTML = '<p class="history-empty">Aucune traduction dans l\'historique</p>';
+    return;
+  }
+  
+  elements.historyList.innerHTML = history.map(item => {
+    const date = new Date(item.createdAt);
+    const dateStr = date.toLocaleDateString('fr-FR', { 
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+    
+    const filesNames = item.files.map(f => f.name).join(', ');
+    const totalSize = item.files.reduce((sum, f) => sum + f.size, 0);
+    
+    return `
+      <div class="history-item" data-session="${item.sessionId}">
+        <div class="history-item-info">
+          <div class="history-item-date">${dateStr}</div>
+          <div class="history-item-files" title="${filesNames}">
+            ${item.totalFiles} fichier(s) - ${formatFileSize(totalSize)}
+          </div>
+          <div class="history-item-meta">
+            <span class="history-lang-badge">${item.targetLanguage}</span>
+            ${item.duration ? `<span>${item.duration}s</span>` : ''}
+          </div>
+        </div>
+        <div class="history-item-actions">
+          <button class="btn btn-secondary" onclick="downloadHistoryZip('${item.sessionId}')">
+            <i class="fas fa-download"></i>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/**
+ * Télécharge le ZIP d'une session depuis l'historique
+ */
+async function downloadHistoryZip(sessionId) {
+  try {
+    const response = await fetch(`/api/translate/history/${sessionId}/download-zip`);
+    
+    if (!response.ok) {
+      throw new Error('Session non trouvée');
+    }
+    
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `traductions_${sessionId}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error('[Historique] Erreur téléchargement:', error);
+    showError('Impossible de télécharger depuis l\'historique: ' + error.message);
+  }
 }
 
 // Lancer l'application
