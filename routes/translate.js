@@ -299,6 +299,28 @@ router.post('/', upload.array('files'), async (req, res) => {
     files: files.map(f => f.originalname)
   });
 
+  // RÉPONSE IMMÉDIATE : le client utilise SSE pour suivre la progression
+  res.json({
+    success: true,
+    sessionId,
+    message: 'Traduction démarrée en arrière-plan',
+    status: 'started'
+  });
+
+  // TRADUCTION EN ARRIÈRE-PLAN (ne bloque pas la réponse HTTP)
+  runTranslationInBackground({
+    sessionId, startTime, targetLanguage, files, testMode, testLines,
+    llmProvider, apiKey, tierLimits, maxParallel, batchSize
+  });
+});
+
+/**
+ * Exécute la traduction en arrière-plan
+ */
+async function runTranslationInBackground(params) {
+  const { sessionId, startTime, targetLanguage, files, testMode, testLines,
+    llmProvider, apiKey, tierLimits, maxParallel, batchSize } = params;
+
   try {
     const results = [];
     // Utiliser RampUpController pour OpenAI (montée progressive), ParallelController pour DeepSeek
@@ -507,6 +529,14 @@ router.post('/', upload.array('files'), async (req, res) => {
       console.log(`[Traduction] Terminé en ${duration}s - DeepSeek - Cache hit: ${finalStats.hitRate}% - Dédup: ${globalTotalOriginal} → ${globalTotalUnique}`);
     }
 
+    // Stocker les résultats pour téléchargement ultérieur
+    translationResults.set(sessionId, {
+      results,
+      targetLanguage,
+      createdAt: Date.now()
+    });
+
+    // Envoyer les infos de téléchargement via SSE (le frontend n'attend plus la réponse HTTP)
     sendSSE(sessionId, {
       type: 'complete',
       duration,
@@ -516,25 +546,8 @@ router.post('/', upload.array('files'), async (req, res) => {
         original: globalTotalOriginal,
         unique: globalTotalUnique,
         saved: globalTotalOriginal - globalTotalUnique
-      }
-    });
-
-    // Nettoyer les fichiers temporaires et le throttle
-    cleanupTempFiles(sessionId);
-    activeSessions.delete(sessionId);
-    sseThrottles.delete(sessionId);
-
-    // Stocker les résultats pour téléchargement ultérieur
-    translationResults.set(sessionId, {
-      results,
-      targetLanguage,
-      createdAt: Date.now()
-    });
-
-    // Retourner les métadonnées des fichiers (le frontend choisira ZIP ou individuel)
-    res.json({
-      success: true,
-      sessionId,
+      },
+      // Infos pour le téléchargement
       files: results.map((r, i) => ({
         index: i,
         name: r.translatedName,
@@ -543,10 +556,13 @@ router.post('/', upload.array('files'), async (req, res) => {
         isPartOfSplit: r.isPartOfSplit || false,
         totalParts: r.totalParts || 1
       })),
-      totalFiles: results.length,
-      duration,
-      stats: finalStats
+      totalFiles: results.length
     });
+
+    // Nettoyer les fichiers temporaires et le throttle
+    cleanupTempFiles(sessionId);
+    activeSessions.delete(sessionId);
+    sseThrottles.delete(sessionId);
 
   } catch (error) {
     console.error('[Traduction] Erreur globale:', error);
@@ -560,10 +576,8 @@ router.post('/', upload.array('files'), async (req, res) => {
     cleanupTempFiles(sessionId);
     activeSessions.delete(sessionId);
     sseThrottles.delete(sessionId);
-
-    res.status(500).json({ error: error.message });
   }
-});
+}
 
 /**
  * Route pour télécharger le fichier temporaire en cours de traduction

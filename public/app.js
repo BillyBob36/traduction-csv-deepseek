@@ -417,25 +417,16 @@ async function startTranslation(isTest = false) {
       throw new Error(data.error || 'Erreur traduction');
     }
 
-    // Stocker les infos pour téléchargement
-    state.translationSessionId = data.sessionId;
-    state.translatedFiles = data.files.map(f => ({
-      name: f.name,
-      size: f.size,
-      index: f.index,
-      isPartOfSplit: f.isPartOfSplit,
-      totalParts: f.totalParts
-    }));
-
-    // Afficher les résultats
-    showResults();
+    // La réponse confirme le démarrage - les résultats arrivent via SSE 'complete'
+    console.log('[Traduction] Démarrée en arrière-plan, attente du SSE complete...');
+    // Le SSE 'complete' appellera showResults() avec les infos de fichiers
 
   } catch (error) {
     showError(error.message);
-  } finally {
     state.isTranslating = false;
     disconnectSSE();
   }
+  // Note: isTranslating et disconnectSSE sont maintenant gérés dans handleSSEMessage 'complete'
 }
 
 /**
@@ -474,7 +465,20 @@ function connectSSE() {
     state.eventSource.onerror = (err) => {
       console.error('[SSE Client] Erreur:', err);
       clearTimeout(timeout);
-      // Ne pas rejeter, le SSE peut se reconnecter automatiquement
+      
+      // Reconnexion automatique si la traduction est toujours en cours
+      if (state.isTranslating && state.eventSource) {
+        console.log('[SSE Client] Déconnexion détectée, reconnexion dans 2s...');
+        state.eventSource.close();
+        state.eventSource = null;
+        
+        setTimeout(() => {
+          if (state.isTranslating) {
+            console.log('[SSE Client] Tentative de reconnexion...');
+            connectSSE().catch(e => console.error('[SSE Client] Échec reconnexion:', e));
+          }
+        }, 2000);
+      }
     };
   });
 }
@@ -547,16 +551,38 @@ function handleSSEMessage(data) {
       break;
 
     case 'complete':
+      console.log('[SSE] Traduction terminée, réception des fichiers');
+      
+      // Stocker les infos pour téléchargement (reçues via SSE)
+      if (data.files && data.files.length > 0) {
+        state.translatedFiles = data.files.map(f => ({
+          name: f.name,
+          size: f.size,
+          index: f.index,
+          isPartOfSplit: f.isPartOfSplit,
+          totalParts: f.totalParts
+        }));
+      }
+      
+      // Mettre à jour les stats
       elements.resultDuration.textContent = `${data.duration}s`;
-      elements.resultCacheHit.textContent = `${data.cacheStats.hitRate}%`;
-      elements.resultCost.textContent = `$${data.cacheStats.estimatedCost.toFixed(4)}`;
+      elements.resultCacheHit.textContent = `${data.cacheStats?.hitRate || 0}%`;
+      elements.resultCost.textContent = `$${(data.cacheStats?.estimatedCost || 0).toFixed(4)}`;
+      
       // Afficher économies de déduplication
       if (data.deduplication) {
         console.log(`[Résultat] Déduplication: ${data.deduplication.original} → ${data.deduplication.unique} (${data.deduplication.saved} économisées)`);
       }
+      
+      // Terminer la traduction et afficher les résultats
+      state.isTranslating = false;
+      disconnectSSE();
+      showResults();
       break;
 
     case 'error':
+      state.isTranslating = false;
+      disconnectSSE();
       showError(data.message);
       break;
   }
