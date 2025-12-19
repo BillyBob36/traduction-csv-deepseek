@@ -187,7 +187,26 @@ async function translateBatch(texts, targetLanguage, apiKey, isHTML = false) {
         throw new Error(`API DeepSeek erreur ${response.status}: ${errorBody}`);
       }
 
-      const data = await response.json();
+      // Lire la réponse en texte d'abord pour vérifier si c'est du JSON valide
+      const responseBody = await response.text();
+      
+      // Vérifier si la réponse est du HTML (erreur proxy/CDN)
+      if (responseBody.trim().startsWith('<') || responseBody.includes('<!DOCTYPE')) {
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+        console.log(`[DeepSeek] Réponse HTML reçue au lieu de JSON, retry dans ${delay}ms...`);
+        await sleep(delay);
+        continue;
+      }
+      
+      let data;
+      try {
+        data = JSON.parse(responseBody);
+      } catch (parseError) {
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+        console.log(`[DeepSeek] Erreur parsing JSON, retry dans ${delay}ms...`);
+        await sleep(delay);
+        continue;
+      }
       
       console.log(`[DeepSeek] Réponse reçue en ${Date.now() - fetchStart}ms`);
       
@@ -215,10 +234,10 @@ async function translateBatch(texts, targetLanguage, apiKey, isHTML = false) {
     } catch (error) {
       lastError = error;
       
-      // Erreur réseau : retry
-      if (error.name === 'TypeError' || error.code === 'ECONNRESET') {
+      // Erreur réseau ou parsing JSON : retry
+      if (error.name === 'TypeError' || error.code === 'ECONNRESET' || error.name === 'SyntaxError') {
         const delay = BASE_DELAY_MS * Math.pow(2, attempt);
-        console.log(`[DeepSeek] Erreur réseau, retry dans ${delay}ms...`);
+        console.log(`[DeepSeek] Erreur réseau/parsing, retry dans ${delay}ms...`);
         await sleep(delay);
         continue;
       }
