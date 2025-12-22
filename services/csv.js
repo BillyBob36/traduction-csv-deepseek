@@ -283,9 +283,11 @@ function splitCSVIfNeeded(csvContent, baseFileName, targetLanguage, maxSizeBytes
   
   // Si le fichier est assez petit, retourner tel quel
   if (contentSize <= maxSizeBytes) {
+    // S'assurer que le contenu se termine par un \n
+    const finalContent = csvContent.endsWith('\n') ? csvContent : csvContent + '\n';
     return [{
       name: `${baseFileName}_${targetLanguage}.csv`,
-      content: csvContent
+      content: finalContent
     }];
   }
   
@@ -320,7 +322,7 @@ function splitCSVIfNeeded(csvContent, baseFileName, targetLanguage, maxSizeBytes
     if (currentSize + lineSize > maxSizeBytes && currentPart.length > 0) {
       parts.push({
         name: `${baseFileName}_part${partNumber}_${targetLanguage}.csv`,
-        content: headerLine + '\n' + currentPart.join('\n')
+        content: headerLine + '\n' + currentPart.join('\n') + '\n'
       });
       partNumber++;
       currentPart = [];
@@ -335,7 +337,7 @@ function splitCSVIfNeeded(csvContent, baseFileName, targetLanguage, maxSizeBytes
   if (currentPart.length > 0) {
     parts.push({
       name: `${baseFileName}_part${partNumber}_${targetLanguage}.csv`,
-      content: headerLine + '\n' + currentPart.join('\n')
+      content: headerLine + '\n' + currentPart.join('\n') + '\n'
     });
   }
   
