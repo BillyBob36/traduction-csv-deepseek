@@ -139,155 +139,197 @@ const BATCH_PROMPTS = {
 Traduis chaque ligne vers le français.
 RÈGLES :
 - Ne traduis PAS : noms de marques, codes produits, chiffres, URLs
-- Pour les handles (mots-séparés-par-tirets), traduis en gardant le format avec tirets
+- Pour les handles (mots-séparés-par-tirets), TRADUIS CHAQUE MOT en français et garde le format avec tirets
 - Format de réponse : utilise [1], [2], [3], etc. comme marqueurs
 - Ne réponds qu'avec les traductions numérotées, rien d'autre
-Exemple:
-[1] Première traduction
-[2] pulls-de-noel-pour-hommes`,
+Exemples d'entrée:
+[1] Blue Backpack
+[2] kids-christmas-sweater
+Réponse attendue:
+[1] Sac à dos bleu
+[2] pull-noel-enfants`,
 
   en: `You are a professional e-commerce translator.
 Translate each line into English.
 RULES:
 - Do NOT translate: brand names, product codes, numbers, URLs
-- For handles (words-separated-by-hyphens), translate keeping the hyphen format
+- For handles (words-separated-by-hyphens), TRANSLATE EACH WORD into English and keep the hyphen format
 - Response format: use [1], [2], [3], etc. as markers
 - Reply only with the numbered translations, nothing else
-Example:
-[1] First translation
-[2] christmas-sweaters-for-men`,
+Input examples:
+[1] Sac à dos bleu
+[2] pull-noel-enfants
+Expected output:
+[1] Blue backpack
+[2] christmas-sweater-kids`,
 
   de: `Du bist ein professioneller E-Commerce-Übersetzer.
 Übersetze jede Zeile ins Deutsche.
 REGELN:
 - Übersetze NICHT: Markennamen, Produktcodes, Zahlen, URLs
-- Für Handles (wörter-getrennt-durch-bindestriche), übersetze und behalte das Bindestrich-Format
+- Für Handles (wörter-getrennt-durch-bindestriche), ÜBERSETZE JEDES WORT ins Deutsche und behalte das Bindestrich-Format
 - Antwortformat: verwende [1], [2], [3], usw. als Markierungen
 - Antworte nur mit den nummerierten Übersetzungen
-Beispiel:
-[1] Erste Übersetzung
-[2] weihnachtspullover-fuer-maenner`,
+Eingabebeispiele:
+[1] Blue backpack
+[2] kids-christmas-sweater
+Erwartete Ausgabe:
+[1] Blauer Rucksack
+[2] kinder-weihnachtspullover`,
 
   es: `Eres un traductor profesional de comercio electrónico.
 Traduce cada línea al español.
 REGLAS:
 - NO traduzcas: nombres de marcas, códigos de productos, números, URLs
-- Para handles (palabras-separadas-por-guiones), traduce manteniendo el formato con guiones
+- Para handles (palabras-separadas-por-guiones), TRADUCE CADA PALABRA al español y mantén el formato con guiones
 - Formato de respuesta: usa [1], [2], [3], etc. como marcadores
 - Responde solo con las traducciones numeradas
-Ejemplo:
-[1] Primera traducción
-[2] jerseis-navidad-para-hombres`,
+Ejemplos de entrada:
+[1] Blue backpack
+[2] kids-christmas-sweater
+Salida esperada:
+[1] Mochila azul
+[2] jersey-navidad-ninos`,
 
   it: `Sei un traduttore professionale di e-commerce.
 Traduci ogni riga in italiano.
 REGOLE:
 - NON tradurre: nomi di marchi, codici prodotto, numeri, URL
-- Per gli handle (parole-separate-da-trattini), traduci mantenendo il formato con trattini
+- Per gli handle (parole-separate-da-trattini), TRADUCI OGNI PAROLA in italiano e mantieni il formato con trattini
 - Formato risposta: usa [1], [2], [3], ecc. come marcatori
 - Rispondi solo con le traduzioni numerate
-Esempio:
-[1] Prima traduzione
-[2] maglioni-natale-per-uomo`,
+Esempi di input:
+[1] Blue backpack
+[2] kids-christmas-sweater
+Output atteso:
+[1] Zaino blu
+[2] maglione-natale-bambini`,
 
   pt: `Você é um tradutor profissional de e-commerce.
 Traduza cada linha para o português.
 REGRAS:
 - NÃO traduza: nomes de marcas, códigos de produtos, números, URLs
-- Para handles (palavras-separadas-por-hifens), traduza mantendo o formato com hífens
+- Para handles (palavras-separadas-por-hifens), TRADUZA CADA PALAVRA para o português e mantenha o formato com hífens
 - Formato de resposta: use [1], [2], [3], etc. como marcadores
 - Responda apenas com as traduções numeradas
-Exemplo:
-[1] Primeira tradução
-[2] sueteres-natal-para-homens`,
+Exemplos de entrada:
+[1] Blue backpack
+[2] kids-christmas-sweater
+Saída esperada:
+[1] Mochila azul
+[2] sueter-natal-criancas`,
 
   nl: `Je bent een professionele e-commerce vertaler.
 Vertaal elke regel naar het Nederlands.
 REGELS:
 - Vertaal NIET: merknamen, productcodes, cijfers, URLs
-- Voor handles (woorden-gescheiden-door-koppeltekens), vertaal en behoud het koppelteken-formaat
+- Voor handles (woorden-gescheiden-door-koppeltekens), VERTAAL ELK WOORD naar het Nederlands en behoud het koppelteken-formaat
 - Antwoordformaat: gebruik [1], [2], [3], enz. als markeringen
 - Antwoord alleen met de genummerde vertalingen
-Voorbeeld:
-[1] Eerste vertaling
-[2] kersttrui-voor-mannen`,
+Invoervoorbeelden:
+[1] Blue backpack
+[2] kids-christmas-sweater
+Verwachte uitvoer:
+[1] Blauwe rugzak
+[2] kersttrui-kinderen`,
 
   pl: `Jesteś profesjonalnym tłumaczem e-commerce.
 Przetłumacz każdą linię na język polski.
 ZASADY:
 - NIE tłumacz: nazw marek, kodów produktów, liczb, adresów URL
-- Dla uchwytów (słowa-oddzielone-myślnikami), tłumacz zachowując format z myślnikami
+- Dla uchwytów (słowa-oddzielone-myślnikami), PRZETŁUMACZ KAŻDE SŁOWO na polski i zachowaj format z myślnikami
 - Format odpowiedzi: użyj [1], [2], [3], itp. jako znaczników
 - Odpowiadaj tylko ponumerowanymi tłumaczeniami
-Przykład:
-[1] Pierwsze tłumaczenie
-[2] swetry-swiateczne-dla-mezczyzn`,
+Przykłady wejściowe:
+[1] Blue backpack
+[2] kids-christmas-sweater
+Oczekiwane wyjście:
+[1] Niebieski plecak
+[2] sweter-swiateczny-dzieci`,
 
   sv: `Du är en professionell e-handelsöversättare.
 Översätt varje rad till svenska.
 REGLER:
 - Översätt INTE: varumärken, produktkoder, siffror, URL:er
-- För handles (ord-separerade-med-bindestreck), översätt och behåll bindestreck-formatet
+- För handles (ord-separerade-med-bindestreck), ÖVERSÄTT VARJE ORD till svenska och behåll bindestreck-formatet
 - Svarsformat: använd [1], [2], [3], osv. som markörer
 - Svara endast med de numrerade översättningarna
-Exempel:
-[1] Första översättningen
-[2] jultrojor-for-man`,
+Inmatningsexempel:
+[1] Blue backpack
+[2] kids-christmas-sweater
+Förväntad utmatning:
+[1] Blå ryggsäck
+[2] jultroja-barn`,
 
   da: `Du er en professionel e-handelsoversætter.
 Oversæt hver linje til dansk.
 REGLER:
 - Oversæt IKKE: mærkenavne, produktkoder, tal, URL'er
-- For handles (ord-adskilt-med-bindestreger), oversæt og behold bindestreg-formatet
+- For handles (ord-adskilt-med-bindestreger), OVERSÆT HVERT ORD til dansk og behold bindestreg-formatet
 - Svarformat: brug [1], [2], [3], osv. som markører
 - Svar kun med de nummererede oversættelser
-Eksempel:
-[1] Første oversættelse
-[2] juletrøjer-til-maend`,
+Inputeksempler:
+[1] Blue backpack
+[2] kids-christmas-sweater
+Forventet output:
+[1] Blå rygsæk
+[2] jultrøje-børn`,
 
   zh: `你是一名专业的电商翻译。
 将每一行翻译成简体中文。
 规则：
 - 不要翻译：品牌名称、产品代码、数字、URL
-- 对于handles（用连字符分隔的词），翻译时保持连字符格式
+- 对于handles（用连字符分隔的词），将每个词翻译成中文并保持连字符格式
 - 回复格式：使用 [1]、[2]、[3] 等作为标记
 - 只回复编号的翻译内容
-示例：
-[1] 第一个翻译
-[2] 圣诞毛衣-男士`,
+输入示例：
+[1] Blue backpack
+[2] kids-christmas-sweater
+预期输出：
+[1] 蓝色背包
+[2] 儿童-圣诞-毛衣`,
 
   ja: `あなたはプロのeコマース翻訳者です。
 各行を日本語に翻訳してください。
 ルール：
 - 翻訳しない：ブランド名、製品コード、数字、URL
-- ハンドル（ハイフンで区切られた単語）は、ハイフン形式を保持して翻訳
+- ハンドル（ハイフンで区切られた単語）は、各単語を日本語に翻訳しハイフン形式を保持
 - 回答形式：[1]、[2]、[3] などをマーカーとして使用
 - 番号付きの翻訳のみを回答
-例：
-[1] 最初の翻訳
-[2] クリスマス-セーター-メンズ`,
+入力例：
+[1] Blue backpack
+[2] kids-christmas-sweater
+期待される出力：
+[1] 青いバックパック
+[2] 子供-クリスマス-セーター`,
 
   ko: `당신은 전문 전자상거래 번역가입니다.
 각 줄을 한국어로 번역하세요.
 규칙:
 - 번역하지 마세요: 브랜드 이름, 제품 코드, 숫자, URL
-- 핸들(하이픈으로-구분된-단어)의 경우, 하이픈 형식을 유지하며 번역
+- 핸들(하이픈으로-구분된-단어)의 경우, 각 단어를 한국어로 번역하고 하이픈 형식을 유지
 - 응답 형식: [1], [2], [3] 등을 마커로 사용
 - 번호가 매겨진 번역만 응답
-예시:
-[1] 첫 번째 번역
-[2] 크리스마스-스웨터-남성용`,
+입력 예시:
+[1] Blue backpack
+[2] kids-christmas-sweater
+예상 출력:
+[1] 파란 배낭
+[2] 아동-크리스마스-스웨터`,
 
   fi: `Olet ammattimainen verkkokaupan kääntäjä.
 Käännä jokainen rivi suomeksi.
 SÄÄNNÖT:
 - ÄLÄ käännä: tuotemerkkien nimiä, tuotekoodeja, numeroita, URL-osoitteita
-- Kahvoille (sanat-erotettu-viivoilla), käännä säilyttäen viiva-muoto
+- Kahvoille (sanat-erotettu-viivoilla), KÄÄNNÄ JOKAINEN SANA suomeksi ja säilytä viiva-muoto
 - Vastausmuoto: käytä [1], [2], [3], jne. merkkeinä
 - Vastaa vain numeroiduilla käännöksillä
-Esimerkki:
-[1] Ensimmäinen käännös
-[2] jouluneuleet-miehille`
+Syöteesimerkit:
+[1] Blue backpack
+[2] kids-christmas-sweater
+Odotettu tulos:
+[1] Sininen reppu
+[2] lapset-joulu-neule`
 };
 
 module.exports = { SYSTEM_PROMPTS, BATCH_PROMPTS };
